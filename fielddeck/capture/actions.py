@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from pydantic import Field
+
 from fielddeck.common.errors import SessionError, UnsupportedCapability
+from fielddeck.common.events import EventType, new_event
 from fielddeck.common.models import PermissionLevel, StrictModel
 from fielddeck.discovery.linux import list_video_devices
 from fielddeck.drivers.base import ActionContext, ActionSpec, NoParams, action, collect_actions
@@ -26,9 +29,64 @@ class ReportParams(StrictModel):
     save: bool = True
 
 
+class ObservationParams(StrictModel):
+    """An interpretation, not a measurement."""
+
+    finding: str = Field(max_length=4000)
+    evidence: list[str] = Field(default_factory=list, max_length=32)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    suggested_next_test: str | None = Field(default=None, max_length=1000)
+    device_id: str | None = None
+
+
 class CaptureActions:
     def __init__(self, daemon: InstrumentDaemon) -> None:
         self.daemon = daemon
+
+    @action(
+        "session.observe",
+        permission=PermissionLevel.PASSIVE,
+        params=ObservationParams,
+        state_changing=False,
+        description="Record an assistant observation, kept separate from measured data.",
+        allowed_during_estop=True,
+    )
+    async def session_observe(
+        self, ctx: ActionContext, params: ObservationParams
+    ) -> dict[str, Any]:
+        """Where an AI conclusion goes so it never masquerades as evidence.
+
+        Observations land on the timeline as ASSISTANT_OBSERVATION events and
+        are rendered in their own clearly-labelled report section. The source
+        is whatever the daemon resolved for the connection, so an observation
+        arriving over the restricted socket is recorded as `claude` and cannot
+        claim to be an operator's note.
+        """
+        recorder = self.daemon.sessions.recorder
+        if recorder is None:
+            raise SessionError("no active session to attach an observation to")
+        event = new_event(
+            EventType.ASSISTANT_OBSERVATION,
+            source=ctx.source,
+            session_id=recorder.session_id,
+            device_id=params.device_id,
+            message=params.finding,
+            payload={
+                "finding": params.finding,
+                "evidence": params.evidence,
+                "confidence": params.confidence,
+                "suggested_next_test": params.suggested_next_test,
+                # Stamped so nothing downstream can mistake this for a reading.
+                "kind": "interpretation",
+            },
+        )
+        ctx.emit(event)
+        return {
+            "recorded": event.event_id,
+            "source": str(ctx.source),
+            "session_id": recorder.session_id,
+            "note": "stored as an interpretation, separate from measured data",
+        }
 
     @action(
         "session.report",

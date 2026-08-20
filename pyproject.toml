@@ -77,6 +77,11 @@ fielddeck-mcp = "fielddeck.mcp.server:main"
 [tool.hatch.build.targets.wheel]
 packages = ["fielddeck"]
 
+# Ship the inline type information; without py.typed, consumers' type
+# checkers silently treat every FieldDeck symbol as Any.
+[tool.hatch.build.targets.wheel.force-include]
+"fielddeck/py.typed" = "fielddeck/py.typed"
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
