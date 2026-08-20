@@ -40,6 +40,7 @@ from fielddeck.analysis.crc import crc, crc_candidates
 from fielddeck.common.errors import InvalidRequest
 
 __all__ = [
+    "KNOWN_DELIMITERS",
     "Segmentation",
     "analyze",
     "byte_histogram",
@@ -68,7 +69,7 @@ DEFAULT_SCAN_LIMIT = 32_768
 MAX_FRAME_LENGTH = 256
 
 #: Bytes that are delimiters often enough to be worth saying so.
-_KNOWN_DELIMITERS: dict[int, str] = {
+KNOWN_DELIMITERS: dict[int, str] = {
     0x00: "COBS / null-terminated framing",
     0x0A: "LF, line-oriented ASCII",
     0x0D: "CR, line-oriented ASCII",
@@ -192,7 +193,7 @@ def candidate_delimiters(
         # Occurrences give confidence; 20 is where more stops adding much.
         support = min(1.0, count / 20.0)
         score = consistency * support
-        if value in _KNOWN_DELIMITERS:
+        if value in KNOWN_DELIMITERS:
             # A known framing byte is a genuine prior, but only worth a
             # nudge: 0x0A is also just a byte inside binary payloads.
             score = min(1.0, score + 0.10)
@@ -205,7 +206,7 @@ def candidate_delimiters(
                 "count": count,
                 "fraction": round(fraction, 4),
                 "score": round(score, 3),
-                "known_as": _KNOWN_DELIMITERS.get(value),
+                "known_as": KNOWN_DELIMITERS.get(value),
                 **stats,
             }
         )
