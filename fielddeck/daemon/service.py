@@ -59,6 +59,7 @@ _OPTIONAL_ACTION_PROVIDERS: tuple[tuple[str, str], ...] = (
     ("fielddeck.recipes.actions", "build_action_specs"),
     ("fielddeck.capture.actions", "build_action_specs"),
     ("fielddeck.debug.actions", "build_action_specs"),
+    ("fielddeck.protocols.actions", "build_action_specs"),
 )
 
 
