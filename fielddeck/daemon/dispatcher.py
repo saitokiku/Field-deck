@@ -253,9 +253,39 @@ class Dispatcher:
                 )
             )
 
-            payload = await self._run_handler(
-                spec, ctx, params, timeout, device_id, request, started
-            )
+            if spec.is_capture:
+                self.bus.publish(
+                    new_event(
+                        EventType.CAPTURE_STARTED,
+                        source=request.source,
+                        session_id=session_id,
+                        device_id=device_id,
+                        action=spec.name,
+                        request_id=request.request_id,
+                        message=f"capture started on {device_id or spec.name}",
+                        payload={"params": _safe_params(values)},
+                    )
+                )
+            try:
+                payload = await self._run_handler(
+                    spec, ctx, params, timeout, device_id, request, started
+                )
+            finally:
+                if spec.is_capture:
+                    # Emitted in a finally block: a capture that timed out or
+                    # was cancelled still wrote bytes, and the timeline has to
+                    # show where the recording ended.
+                    self.bus.publish(
+                        new_event(
+                            EventType.CAPTURE_STOPPED,
+                            source=request.source,
+                            session_id=session_id,
+                            device_id=device_id,
+                            action=spec.name,
+                            request_id=request.request_id,
+                            message=f"capture stopped on {device_id or spec.name}",
+                        )
+                    )
 
         # 8. Leases.  Sustained outputs get a dead-man handle; turning an
         #    output off surrenders it.

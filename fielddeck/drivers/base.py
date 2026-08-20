@@ -140,6 +140,17 @@ class ActionSpec:
     requires_lease: bool = False
     device_id: str | None = None
 
+    @property
+    def is_capture(self) -> bool:
+        """Whether this action brackets a recording on the timeline.
+
+        Any action named ``<something>.capture`` counts. The convention is
+        load-bearing on purpose: it means every subsystem's capture action
+        shows its start and end on the unified timeline without each driver
+        having to remember to say so.
+        """
+        return self.name.endswith(".capture")
+
     def effective_permission(self, params: BaseModel) -> PermissionLevel:
         if self.permission_resolver is None:
             return self.permission

@@ -422,6 +422,10 @@ class SerialDriver(Driver):
         if not settings.rtscts:
             port.rts = False
         try:
+            # pyserial's open() flushes the input buffer.  That is the right
+            # call: anything the kernel buffered while FieldDeck was not
+            # listening has no trustworthy arrival time, and a capture that
+            # stamps stale bytes with "now" is worse than one that starts clean.
             await asyncio.to_thread(port.open)
         # Any failure to open is classified into a typed FieldDeck error below.
         except Exception as exc:
