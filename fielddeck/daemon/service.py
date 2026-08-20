@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib
 import os
 import signal
 from pathlib import Path
@@ -49,6 +50,15 @@ _log = get_logger("fielddeck.daemon.service")
 #: POWER lease drops the output promptly, cheap enough to idle at ~0% CPU.
 SAFETY_TICK_S = 0.25
 
+#: Subsystems that contribute daemon-level actions.  Each is
+#: ``(module, factory)`` where the factory takes the daemon and returns a
+#: ``{name: ActionSpec}`` mapping.  A subsystem whose optional dependency is
+#: missing simply does not register; the daemon still starts.
+_OPTIONAL_ACTION_PROVIDERS: tuple[tuple[str, str], ...] = (
+    ("fielddeck.analysis.actions", "build_action_specs"),
+    ("fielddeck.recipes.actions", "build_action_specs"),
+)
+
 
 class InstrumentDaemon:
     """Owns every device, the safety state and the RPC surface."""
@@ -86,6 +96,7 @@ class InstrumentDaemon:
         )
         self.core = CoreActions(self)
         self.registry.register_global(self.core.specs())
+        self._register_optional_actions()
 
         self._socket_path = socket_path or self.paths.socket
         self._restricted_socket_path = (
@@ -102,6 +113,25 @@ class InstrumentDaemon:
         self._safety_task: asyncio.Task[None] | None = None
         self._stopping = asyncio.Event()
         self._subscription_counter = 0
+
+    def _register_optional_actions(self) -> None:
+        """Load action providers that ship with optional subsystems."""
+        for module_name, factory_name in _OPTIONAL_ACTION_PROVIDERS:
+            try:
+                module = importlib.import_module(module_name)
+            except ImportError as exc:
+                _log.info(
+                    "action provider unavailable",
+                    extra={"module": module_name, "reason": str(exc)},
+                )
+                continue
+            factory = getattr(module, factory_name, None)
+            if factory is None:  # pragma: no cover - defensive
+                continue
+            try:
+                self.registry.register_global(factory(self))
+            except Exception:  # noqa: BLE001 - a bad provider must not block boot
+                _log.exception("action provider failed", extra={"module": module_name})
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -221,7 +251,7 @@ class InstrumentDaemon:
                     )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception:  # noqa: BLE001 - the safety timer must never die quietly
             _log.exception("safety loop failed; restarting it")
             await asyncio.sleep(1.0)
             self._safety_task = asyncio.create_task(self._safety_loop())

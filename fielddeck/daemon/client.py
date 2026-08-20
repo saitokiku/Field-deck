@@ -238,7 +238,7 @@ class InstrumentClient:
             return
         try:
             event = Event.model_validate(message["event"])
-        except Exception:
+        except Exception:  # noqa: BLE001 - a future daemon may add event fields this client cannot parse
             return
         try:
             queue.put_nowait(event)

@@ -40,6 +40,7 @@ _REAL_PROVIDERS: tuple[tuple[str, str], ...] = (
     ("fielddeck.transports.serial_port", "discover_serial_drivers"),
     ("fielddeck.transports.socketcan", "discover_can_drivers"),
     ("fielddeck.bench.visa", "discover_visa_drivers"),
+    ("fielddeck.protocols.modbus", "discover_modbus_drivers"),
 )
 
 
@@ -71,7 +72,7 @@ async def _real(config: FieldDeckConfig) -> list[Driver]:
             continue
         try:
             drivers.extend(factory(config))
-        except Exception:
+        except Exception:  # noqa: BLE001 - one bad transport must not hide the others
             _log.exception("provider failed", extra={"module": module_name})
     return drivers
 
@@ -82,7 +83,7 @@ async def scan(config: FieldDeckConfig) -> list[Driver]:
         return await _simulated(config)
     try:
         return await _real(config)
-    except Exception:
+    except Exception:  # noqa: BLE001 - discovery must never take the daemon down
         _log.exception("hardware discovery failed; continuing with no devices")
         return []
 

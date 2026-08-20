@@ -106,7 +106,7 @@ class EventBus:
         for sink in list(self._sinks):
             try:
                 sink(event)
-            except Exception:
+            except Exception:  # noqa: BLE001 - one broken sink must not stop the event bus
                 _log.exception("event sink failed", extra={"event_type": str(event.type)})
         for subscription in list(self._subscriptions):
             subscription.offer(event)

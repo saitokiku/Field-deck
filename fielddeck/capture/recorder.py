@@ -65,7 +65,7 @@ class SessionRecorder:
                 self._audit.write(record)
                 self._audit.flush()
                 self.timeline.flush()
-        except Exception:
+        except Exception:  # noqa: BLE001 - a recorder fault is logged, never propagated back into the bus
             _log.exception("failed to record event", extra={"session": self.session.id})
 
     # -- marks and notes ---------------------------------------------------

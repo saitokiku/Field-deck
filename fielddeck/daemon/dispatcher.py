@@ -111,7 +111,7 @@ class Dispatcher:
                 duration_ns=monotonic_ns() - started.monotonic_ns,
                 request_id=request.request_id,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - a driver bug must not take the daemon down with it
             _log.exception("unhandled error in action", extra={"action": request.action})
             wrapped = FieldDeckError(
                 f"internal error running {request.action}: {exc}",
@@ -519,7 +519,7 @@ class Dispatcher:
         for driver in drivers:
             try:
                 outcome = await asyncio.wait_for(driver.safe_state(), timeout=10.0)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - report the failure and keep driving the remaining devices safe
                 outcome = {"device": driver.device_id, "applied": False, "error": str(exc)}
                 _log.error(
                     "safe state failed",

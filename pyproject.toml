@@ -103,6 +103,7 @@ select = [
   "SIM",            # simplify
   "RUF",            # ruff-specific
   "ASYNC",          # async correctness
+  "BLE",            # every broad `except Exception` must be justified
   "S",              # bandit-ish security
   "PTH",            # pathlib
   "T20",            # no stray print() outside the CLI/UI

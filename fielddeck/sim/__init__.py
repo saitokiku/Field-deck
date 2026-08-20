@@ -8,6 +8,8 @@ shadowing it.
 
 from __future__ import annotations
 
+import importlib
+
 from fielddeck.drivers.base import Driver
 from fielddeck.sim.can import SimCanDriver
 from fielddeck.sim.dmm import SimDmmDriver
@@ -30,9 +32,32 @@ def build_simulated_devices(*, fault_mode: bool = False) -> list[Driver]:
     enough to exercise discovery, capture, the timeline, arming, leases and
     ESTOP without any hardware attached.
     """
-    return [
+    drivers: list[Driver] = [
         SimCanDriver("can0"),
         SimSerialDriver("sim-uart-0"),
         SimPsuDriver("sim-psu-0", fault_mode=fault_mode),
         SimDmmDriver("sim-dmm-0"),
     ]
+    drivers.extend(_optional_simulated_devices())
+    return drivers
+
+
+#: Simulated devices contributed by subsystems that may not be present.
+_OPTIONAL_SIM_PROVIDERS: tuple[tuple[str, str], ...] = (
+    ("fielddeck.sim.modbus", "build_simulated_modbus_devices"),
+    ("fielddeck.sim.logic", "build_simulated_logic_devices"),
+    ("fielddeck.sim.camera", "build_simulated_camera_devices"),
+)
+
+
+def _optional_simulated_devices() -> list[Driver]:
+    extra: list[Driver] = []
+    for module_name, factory_name in _OPTIONAL_SIM_PROVIDERS:
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        factory = getattr(module, factory_name, None)
+        if factory is not None:
+            extra.extend(factory())
+    return extra

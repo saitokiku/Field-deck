@@ -192,7 +192,7 @@ class DeviceRegistry:
         for driver in self._drivers.values():
             try:
                 results.append(await driver.safe_state())
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - one bad driver must not block safe state on the rest
                 results.append({"device": driver.device_id, "applied": False, "error": str(exc)})
         return results
 

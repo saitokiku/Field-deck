@@ -246,7 +246,7 @@ class SessionManager:
         if self._recorder is not None:
             try:
                 self.stop(source=source)
-            except Exception:
+            except Exception:  # noqa: BLE001 - shutdown must close the session no matter what failed
                 _log.exception("failed to close session cleanly")
                 if self._recorder is not None:
                     self._recorder.close()

@@ -263,7 +263,7 @@ class RpcServer:
             await connection.send(encode_error(request_id, exc.to_dict()))
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - one malformed request must not kill the server
             _log.exception("unhandled RPC error")
             await connection.send(
                 encode_error(
