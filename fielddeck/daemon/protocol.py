@@ -65,7 +65,10 @@ def decode_request(line: bytes) -> RpcRequest:
         )
     try:
         payload = json.loads(line)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        # json.loads sniffs the encoding, so arbitrary bytes can surface as a
+        # UnicodeDecodeError rather than a JSONDecodeError. Both are just a
+        # malformed request and neither deserves a traceback in the log.
         raise InvalidRequest(f"malformed JSON: {exc}") from exc
     if not isinstance(payload, dict):
         raise InvalidRequest("request must be a JSON object")
