@@ -1,0 +1,146 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fielddeck"
+version = "0.1.0"
+description = "A safety-first, terminal-native universal engineering console for Raspberry Pi"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "FieldDeck contributors" }]
+keywords = [
+  "can", "canbus", "socketcan", "modbus", "rs485", "scpi", "instrumentation",
+  "raspberry-pi", "hmi", "protocol-analyzer", "embedded", "test-automation", "mcp",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console :: Curses",
+  "Intended Audience :: Manufacturing",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering",
+  "Topic :: System :: Hardware",
+]
+
+# Core runtime: must import cleanly on a laptop, in CI, and on a Pi with
+# nothing plugged in. Anything that touches real hardware lives in an extra.
+dependencies = [
+  "pydantic>=2.6,<3",
+  "PyYAML>=6.0",
+  "typer>=0.12",
+  "rich>=13.7",
+  "textual>=0.60",
+]
+
+[project.optional-dependencies]
+# Compressed append-only logs. Falls back to gzip when absent.
+compress = ["zstandard>=0.22"]
+
+serial = ["pyserial>=3.5"]
+can = ["python-can>=4.3", "cantools>=39.4"]
+modbus = ["pymodbus>=3.6"]
+bench = ["pyvisa>=1.14", "pyvisa-py>=0.7", "pyusb>=1.2"]
+usb = ["pyusb>=1.2", "hidapi>=0.14"]
+gpio = ["gpiod>=2.1", "smbus2>=0.4", "spidev>=3.6"]
+analysis = ["numpy>=1.26"]
+
+# Everything a Raspberry Pi deployment normally wants.
+hardware = [
+  "fielddeck[compress,serial,can,modbus,bench,usb,analysis]",
+]
+
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-cov>=5.0",
+  "ruff>=0.5",
+  "mypy>=1.10",
+  "types-PyYAML",
+]
+
+[project.urls]
+Homepage = "https://github.com/saitokiku/field-deck"
+Repository = "https://github.com/saitokiku/field-deck"
+Issues = "https://github.com/saitokiku/field-deck/issues"
+
+[project.scripts]
+fdctl = "fielddeck.cli.fdctl:main"
+instrumentd = "fielddeck.daemon.__main__:main"
+fielddeck-ui = "fielddeck.ui.__main__:main"
+fielddeck-mcp = "fielddeck.mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["fielddeck"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers"
+markers = [
+  "hardware: requires physical hardware; never run in CI",
+  "slow: takes more than a second",
+]
+filterwarnings = ["error::DeprecationWarning:fielddeck.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["fielddeck", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E", "F", "W",    # pycodestyle / pyflakes
+  "I",              # isort
+  "UP",             # pyupgrade
+  "B",              # bugbear
+  "C4",             # comprehensions
+  "SIM",            # simplify
+  "RUF",            # ruff-specific
+  "ASYNC",          # async correctness
+  "S",              # bandit-ish security
+  "PTH",            # pathlib
+  "T20",            # no stray print() outside the CLI/UI
+]
+ignore = [
+  "S101",   # assert: fine in tests and internal invariants
+  "SIM108", # ternary-vs-if is a readability call
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "T20"]
+"fielddeck/cli/**" = ["T20"]
+"fielddeck/ui/**" = ["T20"]
+"scripts/**" = ["T20"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["fielddeck"]
+strict = false
+warn_redundant_casts = true
+warn_unused_ignores = false
+warn_unreachable = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+show_error_codes = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+  "can.*", "cantools.*", "serial.*", "pymodbus.*", "pyvisa.*", "usb.*",
+  "gpiod.*", "smbus2.*", "spidev.*", "zstandard.*", "numpy.*", "textual.*",
+]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+branch = true
+source = ["fielddeck"]

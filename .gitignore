@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# FieldDeck runtime state — captured data never belongs in git
+/sessions/*
+!/sessions/.gitkeep
+/recipes/local/*
+!/recipes/local/.gitkeep
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.jsonl
+*.jsonl.zst
+*.jsonl.gz
+instrumentd.sock
+
+# Operator config holds site-specific limits and device aliases
+/config/fielddeck.yaml
+/config/safety.yaml
+/config/ui.yaml
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
