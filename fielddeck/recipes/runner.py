@@ -131,6 +131,8 @@ class RecipeRun(StrictModel):
     recipe: str
     state: RecipeState
     dry_run: bool = False
+    #: Dry runs only: whether preflight would let the recipe start right now.
+    would_start: bool = True
     session_id: str | None = None
     started_utc_ns: int = 0
     ended_utc_ns: int = 0
@@ -204,6 +206,7 @@ class RecipeRunner:
         self._cleanup_note: str | None = None
         self._session_id: str | None = None
         self._session_opened_here = False
+        self._would_start = True
         self._started = Timestamp.now()
         self._deadline_ns = 0
         self._passed = 0
@@ -242,13 +245,25 @@ class RecipeRunner:
         try:
             await self._preflight()
         except FieldDeckError as exc:
+            self._failure = exc.to_dict()
+            self._reason = exc.message
+            self._cleanup_note = "no step ran, so no cleanup was needed"
+            if self.dry_run:
+                # The question a dry run asks is "what would this need?", so a
+                # missing grant is the answer, not a reason to refuse to answer.
+                self._would_start = False
+                self._state = RecipeState.PENDING
+                self._emit_event(
+                    EventType.RECIPE_FINISHED,
+                    severity=EventSeverity.WARNING,
+                    message=f"recipe {self.plan.recipe_name} would not start: {exc.message}",
+                    payload={"run_id": self.run_id, "state": str(self._state), "dry_run": True},
+                )
+                return self._record()
             # Nothing has run, so there is nothing to clean up.  Raise rather
             # than return: the operator asked to run a recipe and it did not
             # start, and the reason belongs in the error, not buried in a report.
             self._state = RecipeState.FAILED
-            self._failure = exc.to_dict()
-            self._reason = exc.message
-            self._cleanup_note = "no step ran, so no cleanup was needed"
             self._emit_event(
                 EventType.RECIPE_FINISHED,
                 severity=EventSeverity.WARNING,
@@ -801,6 +816,7 @@ class RecipeRunner:
             recipe=self.plan.recipe_name,
             state=self._state,
             dry_run=self.dry_run,
+            would_start=self._would_start,
             session_id=self._session_id,
             started_utc_ns=self._started.utc_ns,
             ended_utc_ns=ended.utc_ns,

@@ -297,18 +297,16 @@ class RecipeActions:
         The run is asked to stop rather than killed, so the cleanup phase gets
         to turn outputs off instead of leaving them to the lease timeout.
         """
-        targets = (
-            [self._runs[params.run_id]]
-            if params.run_id in self._runs
-            else list(self._runs.values())
-        )
-        if params.run_id is not None and params.run_id not in self._runs:
-            targets = []
+        if params.run_id is None:
+            targets = list(self._runs.values())
+        else:
+            named = self._runs.get(params.run_id)
+            targets = [named] if named is not None else []
         for runner in targets:
             runner.cancel(f"{params.reason} (via {ctx.source})")
         return {
             "cancelled": [runner.run_id for runner in targets],
-            "running": [run_id for run_id in self._runs],
+            "running": list(self._runs),
         }
 
     # -- plumbing ----------------------------------------------------------
@@ -328,7 +326,9 @@ class RecipeActions:
         )
         try:
             return await client.connect()
-        except Exception as exc:  # noqa: BLE001 - reported as a recipe failure, not a daemon crash
+        # Anything the transport can raise becomes a recipe failure naming the
+        # socket, rather than an unhelpful traceback in the daemon log.
+        except Exception as exc:
             raise RecipeError(
                 f"the recipe engine could not reach the control socket at {socket_path}: {exc}",
                 details={"socket": str(socket_path)},
