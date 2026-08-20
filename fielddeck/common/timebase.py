@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 __all__ = [
+    "ClockWatch",
     "TimeAnchor",
     "Timestamp",
     "format_utc_ns",
@@ -97,6 +98,44 @@ class TimeAnchor:
 
     def as_dict(self) -> dict[str, int]:
         return {"monotonic_ns": self.monotonic_ns, "utc_ns": self.utc_ns}
+
+
+@dataclass(slots=True)
+class ClockWatch:
+    """Detects wall-clock steps by watching UTC drift against monotonic time.
+
+    A Raspberry Pi has no real-time clock.  It boots believing it is some time
+    in 1970 or whenever the filesystem was last written, and then NTP steps it
+    — often minutes into a session, which is exactly when someone is capturing
+    something.  Monotonic timestamps are unaffected, which is why correlation
+    uses them, but the UTC column in a report suddenly stops meaning what it
+    meant an hour earlier.
+
+    Recording the step is the honest answer: the timestamps either side of it
+    are both real, they just belong to different beliefs about what time it
+    was.  Silently carrying on is how a report ends up with events that appear
+    to happen before the session started.
+    """
+
+    #: A step this large or larger is reported.  Small NTP slews are normal
+    #: and adjusting for them would produce constant noise.
+    threshold_s: float = 1.0
+    _reference: tuple[int, int] = (0, 0)
+
+    def __post_init__(self) -> None:
+        ts = Timestamp.now()
+        self._reference = (ts.monotonic_ns, ts.utc_ns)
+
+    def check(self) -> float | None:
+        """Return the size of a step in seconds, or None if the clock is steady."""
+        ref_mono, ref_utc = self._reference
+        ts = Timestamp.now()
+        expected_utc = ref_utc + (ts.monotonic_ns - ref_mono)
+        drift_s = (ts.utc_ns - expected_utc) / 1e9
+        self._reference = (ts.monotonic_ns, ts.utc_ns)
+        if abs(drift_s) >= self.threshold_s:
+            return drift_s
+        return None
 
 
 def format_utc_ns(value: int) -> str:

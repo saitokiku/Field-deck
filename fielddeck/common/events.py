@@ -73,6 +73,7 @@ class EventType(StrEnum):
     ASSISTANT_OBSERVATION = "ASSISTANT_OBSERVATION"
 
     # Daemon
+    CLOCK_STEPPED = "CLOCK_STEPPED"
     DAEMON_STARTED = "DAEMON_STARTED"
     DAEMON_STOPPING = "DAEMON_STOPPING"
     CLIENT_CONNECTED = "CLIENT_CONNECTED"
@@ -104,6 +105,7 @@ AUDIT_EVENTS: frozenset[EventType] = frozenset(
         EventType.OUTPUT_DISABLED,
         EventType.DEVICE_FAULT,
         EventType.CAPTURE_OVERFLOW,
+        EventType.CLOCK_STEPPED,
     }
 )
 

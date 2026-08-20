@@ -33,7 +33,7 @@ from fielddeck.common.models import (
     PermissionLevel,
 )
 from fielddeck.common.paths import Paths, default_paths
-from fielddeck.common.timebase import Timestamp
+from fielddeck.common.timebase import ClockWatch, Timestamp
 from fielddeck.daemon.client import InstrumentClient  # noqa: F401  (re-export convenience)
 from fielddeck.daemon.core_actions import CoreActions
 from fielddeck.daemon.dispatcher import Dispatcher
@@ -252,6 +252,7 @@ class InstrumentDaemon:
         """Reap expired grants and leases; drive safe state on lapse."""
         try:
             ticks = 0
+            clock = ClockWatch()
             while True:
                 await asyncio.sleep(SAFETY_TICK_S)
                 ticks += 1
@@ -260,6 +261,21 @@ class InstrumentDaemon:
                 # case, and the records just before it are the valuable ones.
                 if ticks % _FLUSH_EVERY_TICKS == 0 and self.sessions.recorder is not None:
                     self.sessions.recorder.flush()
+                step_s = clock.check()
+                if step_s is not None:
+                    self.bus.publish(
+                        new_event(
+                            EventType.CLOCK_STEPPED,
+                            severity=EventSeverity.WARNING,
+                            session_id=self.sessions.current_id,
+                            message=(
+                                f"wall clock stepped by {step_s:+.3f}s; monotonic "
+                                "correlation is unaffected but UTC timestamps before "
+                                "and after this point come from different clocks"
+                            ),
+                            payload={"step_s": step_s},
+                        )
+                    )
                 _grants, leases = self.safety.sweep()
                 if leases:
                     await self.dispatcher.apply_safe_state(
