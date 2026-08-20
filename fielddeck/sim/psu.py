@@ -163,6 +163,35 @@ class SimPsuDriver(SimulatedDeviceMixin, Driver):
         return await self.status()
 
     @action(
+        "bench.status",
+        permission=PermissionLevel.PASSIVE,
+        params=DeviceParams,
+        state_changing=False,
+        description="Cached instrument state. Does not talk to the instrument.",
+        allowed_during_estop=True,
+    )
+    async def bench_status(self, ctx: ActionContext, params: DeviceParams) -> dict[str, Any]:
+        return await self.status()
+
+    @action(
+        "bench.identify",
+        permission=PermissionLevel.QUERY,
+        params=DeviceParams,
+        state_changing=False,
+        description="Query instrument identity with *IDN? and select a profile.",
+    )
+    async def bench_identify(self, ctx: ActionContext, params: DeviceParams) -> dict[str, Any]:
+        """QUERY: asking an instrument who it is means transmitting to it."""
+        status = await self.status()
+        return {
+            "identity": status["identity"],
+            "profile": "fielddeck.sim",
+            "role": "psu",
+            "hardware_verified": False,
+            "simulated": True,
+        }
+
+    @action(
         "psu.measure",
         permission=PermissionLevel.QUERY,
         params=DeviceParams,

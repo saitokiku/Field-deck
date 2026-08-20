@@ -68,16 +68,35 @@ class SimDmmDriver(SimulatedDeviceMixin, Driver):
             "state": str(self._descriptor.state),
         }
 
+    # Named to match the real VISA driver: a client written against the
+    # simulator has to keep working when an instrument is plugged in.
     @action(
-        "dmm.status",
+        "bench.status",
         permission=PermissionLevel.PASSIVE,
         params=DeviceParams,
         state_changing=False,
-        description="Instrument identity and supported functions.",
+        description="Cached instrument state. Does not talk to the instrument.",
         allowed_during_estop=True,
     )
-    async def dmm_status(self, ctx: ActionContext, params: DeviceParams) -> dict[str, Any]:
+    async def bench_status(self, ctx: ActionContext, params: DeviceParams) -> dict[str, Any]:
         return await self.status()
+
+    @action(
+        "bench.identify",
+        permission=PermissionLevel.QUERY,
+        params=DeviceParams,
+        state_changing=False,
+        description="Query instrument identity with *IDN? and select a profile.",
+    )
+    async def bench_identify(self, ctx: ActionContext, params: DeviceParams) -> dict[str, Any]:
+        """QUERY: asking an instrument who it is means transmitting to it."""
+        status = await self.status()
+        return {
+            "identity": status["identity"],
+            "profile": "fielddeck.sim",
+            "hardware_verified": False,
+            "simulated": True,
+        }
 
     @action(
         "dmm.measure",
