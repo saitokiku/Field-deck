@@ -554,8 +554,19 @@ class RecipeRunner:
         )
 
     async def _run_action(
-        self, step: PlannedStep, started: Timestamp, *, timeout_s: float | None = None
+        self,
+        step: PlannedStep,
+        started: Timestamp,
+        *,
+        timeout_s: float | None = None,
+        interruptible: bool = True,
     ) -> StepRecord:
+        """Run one action through the daemon.
+
+        ``interruptible`` is False for cleanup steps: by then the stop signal is
+        usually already set, and a ``finally`` step that cancelled itself the
+        moment it started would be a cleanup phase that never cleans anything.
+        """
         assert step.action is not None
         request_id = f"{self.run_id}.{step.index}"
         call = asyncio.ensure_future(
@@ -566,21 +577,21 @@ class RecipeRunner:
                 request_id=request_id,
             )
         )
-        stop = asyncio.ensure_future(self._stop.wait())
-        try:
-            done, _pending = await asyncio.wait({call, stop}, return_when=asyncio.FIRST_COMPLETED)
-            if call not in done:
-                # Stopping mid-step: ask the daemon to cancel the action by its
-                # request id rather than dropping the call on the floor, so the
-                # driver gets to finish writing whatever it had captured.
-                with contextlib.suppress(FieldDeckError):
-                    await self.client.call("action.cancel", {"request_id": request_id})
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(asyncio.shield(call), CLEANUP_STEP_TIMEOUT_S)
-        finally:
-            stop.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await stop
+        if interruptible:
+            await self._race_against_stop(call, request_id)
+            if not call.done():
+                call.cancel()
+                with contextlib.suppress(asyncio.CancelledError, FieldDeckError):
+                    await call
+                return self._record_step(
+                    step,
+                    started,
+                    StepOutcome.CANCELLED,
+                    error={
+                        "code": str(ErrorCode.ACTION_CANCELLED),
+                        "message": f"{step.action} did not stop when asked; it was abandoned",
+                    },
+                )
 
         try:
             result: ActionResult = await call
@@ -600,6 +611,28 @@ class RecipeRunner:
         if isinstance(lease, dict) and lease.get("lease_id"):
             self._leases.append(str(lease["lease_id"]))
         return self._record_step(step, started, StepOutcome.OK, result=payload)
+
+    async def _race_against_stop(self, call: asyncio.Future[Any], request_id: str) -> None:
+        """Let a step finish, unless the run is stopping — then stop it properly.
+
+        Cancellation goes through the daemon by request id rather than by
+        dropping the call: the driver gets to close its capture file, and the
+        dispatcher gets to release the lease, neither of which happens if the
+        client simply walks away.
+        """
+        stop = asyncio.ensure_future(self._stop.wait())
+        try:
+            done, _pending = await asyncio.wait({call, stop}, return_when=asyncio.FIRST_COMPLETED)
+            if call in done:
+                return
+            with contextlib.suppress(FieldDeckError):
+                await self.client.call("action.cancel", {"request_id": request_id})
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(call), CLEANUP_STEP_TIMEOUT_S)
+        finally:
+            stop.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stop
 
     def _merge_namespace(self, step: PlannedStep, result: dict[str, Any]) -> None:
         if step.action is None:
@@ -666,13 +699,34 @@ class RecipeRunner:
             return
         for step in self.plan.finally_steps:
             started = Timestamp.now()
+            self._emit_event(
+                EventType.RECIPE_STEP_STARTED,
+                action=step.action,
+                device_id=step.device_id,
+                permission=step.permission,
+                message=f"cleanup: {step.describe()}",
+                payload={
+                    "run_id": self.run_id,
+                    "step": step.index,
+                    "phase": str(RecipePhase.FINALLY),
+                },
+            )
             try:
                 if step.kind is StepKind.ASSERT:
                     record = self._run_assert(step, started)
                 elif step.kind is StepKind.WAIT:
+                    # A settle time declared in cleanup is a real one (a rail
+                    # discharging), so it is honoured -- bounded, because the
+                    # cleanup budget is shared with the steps that follow.
+                    await asyncio.sleep(min(step.seconds or 0.0, CLEANUP_STEP_TIMEOUT_S))
                     record = self._record_step(step, started, StepOutcome.OK)
                 else:
-                    record = await self._run_action(step, started, timeout_s=CLEANUP_STEP_TIMEOUT_S)
+                    record = await self._run_action(
+                        step,
+                        started,
+                        timeout_s=CLEANUP_STEP_TIMEOUT_S,
+                        interruptible=False,
+                    )
             except FieldDeckError as exc:  # pragma: no cover - _run_action absorbs these
                 record = self._record_step(step, started, StepOutcome.FAILED, error=exc.to_dict())
             self._finally.append(record)

@@ -185,6 +185,10 @@ def number_candidates(text: str) -> list[NumberParse]:
         return []
     negative = cleaned.startswith("-")
     body = cleaned[1:] if negative else cleaned
+    if not body:
+        # A bare sign is not a number, and "every character is a hex digit" is
+        # vacuously true of the empty string.
+        return []
     sign = -1 if negative else 1
     lowered = body.lower()
 

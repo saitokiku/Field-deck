@@ -531,29 +531,29 @@ def _one_delimiter(data: bytes, entry: dict[str, Any]) -> Hypothesis | None:
     decoder = "delimiter"
 
     if value == 0x00:
-        decoded = _decodes_as(frames, cobs_decode)
-        if decoded >= max(3, int(len(frames) * 0.9)):
+        decoded, testable = _decodes_as(frames, cobs_decode)
+        if testable >= 3 and decoded >= max(3, int(testable * 0.9)):
             protocol = "COBS-framed binary protocol"
             decoder = "cobs"
             weights.append(0.8)
             supporting.append(
-                f"{decoded}/{len(frames)} frames decode as valid COBS blocks — the first "
+                f"{decoded}/{testable} frames decode as valid COBS blocks — the first "
                 "byte of each frame points at the next zero, which noise does not do"
             )
-        elif decoded:
+        elif testable >= 3:
             contradicting.append(
-                f"only {decoded}/{len(frames)} frames decode as COBS, so 0x00 is "
+                f"only {decoded}/{testable} frames decode as COBS, so 0x00 is "
                 "probably padding rather than a COBS delimiter"
             )
     elif value == 0xC0:
-        decoded = _decodes_as(frames, slip_decode)
-        if decoded >= max(3, int(len(frames) * 0.9)):
+        decoded, testable = _decodes_as(frames, slip_decode)
+        if testable >= 3 and decoded >= max(3, int(testable * 0.9)):
             protocol = "SLIP-framed protocol (RFC 1055)"
             decoder = "slip"
             weights.append(0.75)
-            supporting.append(f"{decoded}/{len(frames)} frames unescape cleanly as SLIP")
-        elif decoded:
-            contradicting.append(f"only {decoded}/{len(frames)} frames unescape cleanly as SLIP")
+            supporting.append(f"{decoded}/{testable} frames unescape cleanly as SLIP")
+        elif testable >= 3:
+            contradicting.append(f"only {decoded}/{testable} frames unescape cleanly as SLIP")
 
     lengths = {len(frame) for frame in frames}
     if len(lengths) == 1:
@@ -583,18 +583,25 @@ def _one_delimiter(data: bytes, entry: dict[str, Any]) -> Hypothesis | None:
     )
 
 
-def _decodes_as(frames: Sequence[bytes], decoder: Any) -> int:
-    """How many frames survive a codec, without letting one bad frame raise."""
+def _decodes_as(frames: Sequence[bytes], decoder: Any, *, min_length: int = 2) -> tuple[int, int]:
+    """How many frames survive a codec, and how many were worth testing.
+
+    Frames of one byte are excluded: a lone 0x01 between two zeros is a valid
+    COBS block for an empty packet, so a stream of alternating 0x00/0x01
+    "decodes perfectly" while carrying no evidence at all.
+    """
     good = 0
+    testable = 0
     for frame in frames:
-        if not frame:
+        if len(frame) < min_length:
             continue
+        testable += 1
         try:
             decoder(frame)
         except FieldDeckError:
             continue
         good += 1
-    return good
+    return good, testable
 
 
 def _fixed_frame_hypothesis(report: dict[str, Any]) -> Hypothesis | None:
