@@ -16,8 +16,9 @@ import secrets
 from pathlib import Path
 from typing import Any
 
-from fielddeck.capture.storage import AppendLog, SessionLayout, sha256_file
+from fielddeck.capture.storage import AppendLog, SessionLayout, free_space_mb, sha256_file
 from fielddeck.capture.timeline import Timeline
+from fielddeck.common.errors import CaptureError
 from fielddeck.common.events import Event
 from fielddeck.common.logging import get_logger
 from fielddeck.common.models import CaptureArtifact, ClientSource, Session, SessionMark
@@ -31,10 +32,18 @@ _log = get_logger("fielddeck.capture.recorder")
 class SessionRecorder:
     """Owns one session's on-disk state."""
 
-    def __init__(self, session: Session, layout: SessionLayout, anchor: TimeAnchor) -> None:
+    def __init__(
+        self,
+        session: Session,
+        layout: SessionLayout,
+        anchor: TimeAnchor,
+        *,
+        min_free_mb: float = 0.0,
+    ) -> None:
         self.session = session
         self.layout = layout
         self.anchor = anchor
+        self.min_free_mb = min_free_mb
         self.timeline = Timeline(layout.timeline_db)
         self._events = AppendLog(layout.events_log).open()
         self._audit = AppendLog(layout.audit_log).open()
@@ -112,8 +121,26 @@ class SessionRecorder:
     # -- artifacts ---------------------------------------------------------
 
     def capture_path(self, kind: str, stem: str, suffix: str) -> Path:
-        """A fresh, non-colliding path inside the session for raw capture."""
+        """A fresh, non-colliding path inside the session for raw capture.
+
+        Checked against the free-space floor here rather than only at session
+        start: a session opened an hour ago on a healthy card can still be
+        asked for a capture on a full one, and a capture that runs the SD card
+        to zero takes the SQLite timeline down with it.
+        """
+        if self.min_free_mb > 0:
+            free = free_space_mb(self.layout.root)
+            if free < self.min_free_mb:
+                raise CaptureError(
+                    f"only {free:.0f} MB free at {self.layout.root}; "
+                    f"{self.min_free_mb:.0f} MB is the configured floor",
+                    details={"free_mb": free, "required_mb": self.min_free_mb},
+                    preserved="everything already captured in this session is intact",
+                )
         return self.layout.next_filename(kind, stem, suffix)
+
+    def free_space_mb(self) -> float:
+        return free_space_mb(self.layout.root)
 
     def add_artifact(
         self,

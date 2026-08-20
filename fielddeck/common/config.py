@@ -135,11 +135,15 @@ class DisplayConfig(StrictModel):
 
 class StorageConfig(StrictModel):
     sessions_dir: Path | None = None
-    #: Stop accepting new captures below this much free space.
+    #: Stop accepting new captures below this much free space. Enforced at
+    #: session start, at every new capture file, and warned about on a timer.
     min_free_mb: int = 256
-    #: Roll a capture file once it exceeds this size.
-    max_capture_file_mb: int = 256
     compress_event_log: bool = True
+
+    # Note: there is deliberately no max_capture_file_mb here. Rolling a
+    # capture mid-stream is not implemented, and a configuration key that
+    # silently does nothing is worse than an absent feature — it reads as a
+    # guarantee. Bound a capture with its duration or max_frames instead.
 
 
 class LoggingConfig(StrictModel):

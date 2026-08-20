@@ -18,6 +18,7 @@ from typing import Any, ClassVar
 
 from fielddeck import RPC_PROTOCOL_VERSION, __version__
 from fielddeck.capture.sessions import SessionManager
+from fielddeck.capture.storage import free_space_mb
 from fielddeck.common.config import (
     FieldDeckConfig,
     SafetyConfig,
@@ -52,6 +53,9 @@ SAFETY_TICK_S = 0.25
 
 #: Flush the session recorder every fourth tick, i.e. about once a second.
 _FLUSH_EVERY_TICKS = 4
+
+#: Check free space every twentieth tick, about every five seconds.
+_STORAGE_CHECK_EVERY_TICKS = 20
 
 #: Subsystems that contribute daemon-level actions.  Each is
 #: ``(module, factory)`` where the factory takes the daemon and returns a
@@ -253,6 +257,7 @@ class InstrumentDaemon:
         try:
             ticks = 0
             clock = ClockWatch()
+            storage_warned = False
             while True:
                 await asyncio.sleep(SAFETY_TICK_S)
                 ticks += 1
@@ -261,6 +266,8 @@ class InstrumentDaemon:
                 # case, and the records just before it are the valuable ones.
                 if ticks % _FLUSH_EVERY_TICKS == 0 and self.sessions.recorder is not None:
                     self.sessions.recorder.flush()
+                if ticks % _STORAGE_CHECK_EVERY_TICKS == 0:
+                    storage_warned = self._check_storage(storage_warned)
                 step_s = clock.check()
                 if step_s is not None:
                     self.bus.publish(
@@ -288,6 +295,36 @@ class InstrumentDaemon:
             _log.exception("safety loop failed; restarting it")
             await asyncio.sleep(1.0)
             self._safety_task = asyncio.create_task(self._safety_loop())
+
+    def _check_storage(self, already_warned: bool) -> bool:
+        """Warn once when the session store crosses the free-space floor.
+
+        Once, not every tick: an operator who is told the same thing forty
+        times a minute stops reading any of it.
+        """
+        floor = self.config.storage.min_free_mb
+        if floor <= 0:
+            return already_warned
+        free = free_space_mb(self.sessions.sessions_dir)
+        if free < floor and not already_warned:
+            self.bus.publish(
+                new_event(
+                    EventType.STORAGE_LOW,
+                    severity=EventSeverity.WARNING,
+                    session_id=self.sessions.current_id,
+                    message=(
+                        f"only {free:.0f} MB free at {self.sessions.sessions_dir}; "
+                        f"new captures are refused below the {floor} MB floor"
+                    ),
+                    payload={"free_mb": free, "floor_mb": floor},
+                )
+            )
+            return True
+        if free >= floor * 1.1:
+            # Hysteresis, so a card hovering on the threshold does not
+            # alternate between warning and silence.
+            return False
+        return already_warned
 
     async def _on_disconnect(self, connection: ClientConnection) -> None:
         """A client that dies must not leave hardware energised."""

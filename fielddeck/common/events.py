@@ -61,6 +61,7 @@ class EventType(StrEnum):
     ARTIFACT_ADDED = "ARTIFACT_ADDED"
     MEASUREMENT = "MEASUREMENT"
     CAPTURE_OVERFLOW = "CAPTURE_OVERFLOW"
+    STORAGE_LOW = "STORAGE_LOW"
 
     # Recipes
     RECIPE_STARTED = "RECIPE_STARTED"
@@ -106,6 +107,7 @@ AUDIT_EVENTS: frozenset[EventType] = frozenset(
         EventType.DEVICE_FAULT,
         EventType.CAPTURE_OVERFLOW,
         EventType.CLOCK_STEPPED,
+        EventType.STORAGE_LOW,
     }
 )
 

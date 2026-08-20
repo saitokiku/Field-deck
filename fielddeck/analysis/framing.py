@@ -130,7 +130,9 @@ def shannon_entropy(data: bytes) -> float:
         return 0.0
     counts = Counter(data)
     total = len(data)
-    return round(-sum((c / total) * math.log2(c / total) for c in counts.values()), 3)
+    entropy = -sum((c / total) * math.log2(c / total) for c in counts.values())
+    # A single repeated byte gives exactly zero, which floats render as -0.0.
+    return round(entropy, 3) if entropy else 0.0
 
 
 def _collision_probability(data: bytes) -> float:

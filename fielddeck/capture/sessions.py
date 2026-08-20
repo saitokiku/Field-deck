@@ -110,7 +110,12 @@ class SessionManager:
             simulated=self._simulated,
             metadata=dict(metadata or {}),
         )
-        recorder = SessionRecorder(session, layout, TimeAnchor(ts.monotonic_ns, ts.utc_ns))
+        recorder = SessionRecorder(
+            session,
+            layout,
+            TimeAnchor(ts.monotonic_ns, ts.utc_ns),
+            min_free_mb=self._min_free_mb,
+        )
         recorder.write_session_json()
         self._recorder = recorder
         if self._bus is not None:
