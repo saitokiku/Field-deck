@@ -642,6 +642,10 @@ class BenchInstrumentDriver(Driver):
         )
         super().__init__(descriptor)
         self.resource = resource
+        #: Warnings that stay true after identification — port contention, a
+        #: missing backend library — as opposed to "identity unknown", which
+        #: bench.identify clears.
+        self._standing_warning = warning
         self._declared_profile = declared_profile
         self._profile: InstrumentProfile | None = None
         self._identity: Identity | None = None
@@ -680,8 +684,13 @@ class BenchInstrumentDriver(Driver):
         return {
             "resource": self.resource,
             "identified": profile is not None,
-            "identity": self._identity.describe() if self._identity else None,
-            "profile": profile.describe() if profile else None,
+            # Scalar first, detail alongside: a client written against the
+            # simulated instruments reads result["identity"] and
+            # result["profile"] as strings, and must keep working here.
+            "identity": self._identity.raw if self._identity else None,
+            "identity_fields": self._identity.describe() if self._identity else None,
+            "profile": profile.key if profile else None,
+            "profile_detail": profile.describe() if profile else None,
             "declared_profile": self._declared_profile.key if self._declared_profile else None,
             "role": str(profile.role) if profile else None,
             "channel": self._channel,
@@ -1032,8 +1041,11 @@ class BenchInstrumentDriver(Driver):
         self._set_state(ConnectionState.READY)
 
         return {
-            "identity": identity.describe(),
-            "profile": profile.describe(),
+            "identity": identity.raw,
+            "identity_fields": identity.describe(),
+            "profile": profile.key,
+            "role": str(profile.role),
+            "profile_detail": profile.describe(),
             "matched_automatically": matched is not None,
             "pinned_by_operator": pinned is not None,
             "pin_conflicts_with_identity": pin_conflict,
@@ -1080,14 +1092,13 @@ class BenchInstrumentDriver(Driver):
             "hardware_verified": profile.hardware_verified,
             "supported_actions": list(profile.supported_actions()),
         }
-        descriptor.warning = (
-            None
-            if profile is not GENERIC_SCPI
-            else (
+        warnings = [self._standing_warning] if self._standing_warning else []
+        if profile is GENERIC_SCPI:
+            warnings.append(
                 "no profile matched this identity; the generic profile can query but has no "
                 "setpoint, output or load commands"
             )
-        )
+        descriptor.warning = "; ".join(warnings) or None
 
     @action(
         "bench.status",

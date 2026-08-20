@@ -47,6 +47,7 @@ from fielddeck.common.errors import (
     ActionTimeout,
     DeviceBusy,
     DeviceDisconnected,
+    FieldDeckError,
     PermissionDenied,
     ProtocolError,
     TransportError,
@@ -606,6 +607,10 @@ class ScpiTransport:
                 details={"device_id": self.device_id, "resource": self.resource, "op": what},
                 preserved=self._preserved(what, command),
             ) from exc
+        except FieldDeckError:
+            # Already one of ours — a missing pyvisa, for instance.  Re-wrapping
+            # it would bury the message that tells the operator what to install.
+            raise
         except Exception as exc:
             raise self._map_error(exc, what=what, command=command) from exc
         finally:
