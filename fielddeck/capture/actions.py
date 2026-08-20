@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from fielddeck.common.errors import UnsupportedCapability
-from fielddeck.common.models import PermissionLevel
+from fielddeck.common.errors import SessionError, UnsupportedCapability
+from fielddeck.common.models import PermissionLevel, StrictModel
 from fielddeck.discovery.linux import list_video_devices
 from fielddeck.drivers.base import ActionContext, ActionSpec, NoParams, action, collect_actions
 
@@ -20,9 +20,73 @@ if TYPE_CHECKING:  # pragma: no cover
 __all__ = ["build_action_specs"]
 
 
+class ReportParams(StrictModel):
+    session_id: str | None = None
+    format: str = "markdown"
+    save: bool = True
+
+
 class CaptureActions:
     def __init__(self, daemon: InstrumentDaemon) -> None:
         self.daemon = daemon
+
+    @action(
+        "session.report",
+        permission=PermissionLevel.PASSIVE,
+        params=ReportParams,
+        state_changing=False,
+        description="Build a deterministic report for a session.",
+        allowed_during_estop=True,
+        timeout_s=120.0,
+    )
+    async def session_report(self, ctx: ActionContext, params: ReportParams) -> dict[str, Any]:
+        """Facts and AI interpretation are rendered in separate sections."""
+        import asyncio
+
+        from fielddeck.capture.report import build_report, render_markdown
+
+        session_id = params.session_id or self.daemon.sessions.current_id
+        if session_id is None:
+            raise SessionError("no active session and no session_id given")
+        # Flush first so a report on the live session includes everything
+        # recorded up to this instant.
+        if self.daemon.sessions.recorder is not None:
+            self.daemon.sessions.recorder.flush()
+        session_dir = self.daemon.sessions.sessions_dir / session_id
+
+        report = await asyncio.to_thread(build_report, session_dir)
+        if params.format not in {"markdown", "json"}:
+            raise SessionError(
+                f"unknown report format {params.format!r}",
+                details={"known": ["markdown", "json"]},
+            )
+        rendered = render_markdown(report) if params.format == "markdown" else None
+
+        saved: str | None = None
+        if params.save and rendered is not None:
+            path = session_dir / "reports" / "session-report.md"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(path.write_text, rendered, "utf-8")
+            saved = str(path.relative_to(session_dir))
+            if (
+                self.daemon.sessions.recorder is not None
+                and self.daemon.sessions.current_id == session_id
+            ):
+                self.daemon.sessions.recorder.add_artifact(
+                    path,
+                    kind="reports",
+                    media_type="text/markdown",
+                    raw=False,
+                    producer="fielddeck.capture.report",
+                    producer_version="1",
+                )
+        return {
+            "session_id": session_id,
+            "format": params.format,
+            "markdown": rendered,
+            "report": report if params.format == "json" else None,
+            "saved_to": saved,
+        }
 
     @action(
         "logic.devices",
