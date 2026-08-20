@@ -56,6 +56,11 @@ _log = get_logger("fielddeck.daemon.dispatcher")
 #: cancellable instead of running without a deadline.
 MAX_TIMEOUT_S = 3600.0
 
+#: How long any one device gets to reach its safe state. Short on purpose: a
+#: device that cannot turn its output off in this long is not going to, and
+#: waiting longer only delays the devices that would have complied.
+SAFE_STATE_TIMEOUT_S = 5.0
+
 
 @dataclass(slots=True)
 class _Running:
@@ -593,23 +598,45 @@ class Dispatcher:
         does not consult the arm grants, because everything it does makes
         hardware *safer* — refusing to turn an output off because a grant
         lapsed would be the opposite of a safety system.
+
+        Devices are safed **concurrently**, each under its own timeout.  Doing
+        this sequentially meant one wedged driver delayed every device behind
+        it in the list: an emergency stop that takes ten seconds because an
+        unrelated logic analyzer stopped answering is not an emergency stop,
+        and whichever device happened to be ordered after it stayed live for
+        the duration.  Total time is now the slowest single device rather than
+        the sum of all of them.
         """
-        results: list[dict[str, Any]] = []
-        drivers = (
-            [d for d in self.registry.drivers if device_ids is None or d.device_id in device_ids]
-            if device_ids is not None
-            else self.registry.drivers
-        )
-        for driver in drivers:
+        drivers = [
+            driver
+            for driver in self.registry.drivers
+            if device_ids is None or driver.device_id in device_ids
+        ]
+        if not drivers:
+            return []
+
+        async def safe_one(driver: Driver) -> dict[str, Any]:
             try:
-                outcome = await asyncio.wait_for(driver.safe_state(), timeout=10.0)
-            except Exception as exc:  # noqa: BLE001 - report the failure and keep driving the remaining devices safe
-                outcome = {"device": driver.device_id, "applied": False, "error": str(exc)}
+                return await asyncio.wait_for(driver.safe_state(), timeout=SAFE_STATE_TIMEOUT_S)
+            except TimeoutError:
+                _log.error(
+                    "safe state timed out",
+                    extra={"device": driver.device_id, "timeout_s": SAFE_STATE_TIMEOUT_S},
+                )
+                return {
+                    "device": driver.device_id,
+                    "applied": False,
+                    "error": f"safe_state did not return within {SAFE_STATE_TIMEOUT_S:g}s",
+                }
+            except Exception as exc:  # noqa: BLE001 - one bad driver must not stop the rest
                 _log.error(
                     "safe state failed",
                     extra={"device": driver.device_id, "error": str(exc)},
                 )
-            results.append(outcome)
+                return {"device": driver.device_id, "applied": False, "error": str(exc)}
+
+        results = await asyncio.gather(*(safe_one(driver) for driver in drivers))
+        for driver, outcome in zip(drivers, results, strict=True):
             self.bus.publish(
                 new_event(
                     EventType.SAFE_STATE_APPLIED,
@@ -620,7 +647,7 @@ class Dispatcher:
                     payload={"reason": reason, "outcome": outcome},
                 )
             )
-        return results
+        return list(results)
 
 
 # ---------------------------------------------------------------------------
