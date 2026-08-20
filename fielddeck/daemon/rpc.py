@@ -39,7 +39,12 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from fielddeck.common.errors import FieldDeckError, InvalidRequest, PermissionDenied
+from fielddeck.common.errors import (
+    ConfigurationError,
+    FieldDeckError,
+    InvalidRequest,
+    PermissionDenied,
+)
 from fielddeck.common.logging import get_logger
 from fielddeck.common.models import ClientSource
 from fielddeck.daemon.protocol import (
@@ -66,6 +71,29 @@ AUTHORIZATION_METHODS = frozenset({"safety.arm", "safety.disarm", "safety.estop_
 #: bound exists so a client that floods the socket meets backpressure on the
 #: read loop instead of growing the task set without limit.
 MAX_INFLIGHT_PER_CONNECTION = 32
+
+
+async def _socket_is_live(path: Path) -> bool:
+    """Is something actually accepting connections on this socket?
+
+    Distinguishes a running daemon from a socket file left behind by one that
+    was killed.  A refused connection or a missing file means stale; anything
+    that connects means a live owner.
+    """
+    try:
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(str(path)), timeout=2.0
+        )
+    except (ConnectionRefusedError, FileNotFoundError):
+        return False
+    except (OSError, TimeoutError):
+        # Something is there but not answering cleanly. Treat it as live:
+        # refusing to start is recoverable, stealing the socket is not.
+        return True
+    writer.close()
+    with contextlib.suppress(Exception):
+        await writer.wait_closed()
+    return True
 
 
 class ClientConnection:
@@ -208,6 +236,21 @@ class RpcServer:
         # here are measured in microseconds and happen before we serve anyone.
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists() or path.is_symlink():  # noqa: ASYNC240
+            if await _socket_is_live(path):
+                # Never bind over a live socket. Two daemons then each believe
+                # they own the hardware: both can open the same CAN interface,
+                # one can be holding a supply output up under a lease the other
+                # cannot see, and an ESTOP sent to the socket reaches only one
+                # of them.
+                raise ConfigurationError(
+                    f"another instrumentd is already listening on {path}. Stop it "
+                    "first (systemctl stop instrumentd), or set FIELDDECK_SOCKET to "
+                    "run a second instance against different hardware.",
+                    details={"socket": str(path)},
+                    preserved="the running daemon was left untouched",
+                )
+            # A socket file left behind by a killed daemon is safe to remove.
+            _log.info("removing stale socket", extra={"path": str(path)})
             path.unlink()  # noqa: ASYNC240
 
         async def on_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
