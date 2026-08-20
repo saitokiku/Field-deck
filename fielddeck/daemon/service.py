@@ -125,7 +125,7 @@ class InstrumentDaemon:
             except ImportError as exc:
                 _log.info(
                     "action provider unavailable",
-                    extra={"module": module_name, "reason": str(exc)},
+                    extra={"provider": module_name, "reason": str(exc)},
                 )
                 continue
             factory = getattr(module, factory_name, None)
@@ -134,7 +134,7 @@ class InstrumentDaemon:
             try:
                 self.registry.register_global(factory(self))
             except Exception:  # noqa: BLE001 - a bad provider must not block boot
-                _log.exception("action provider failed", extra={"module": module_name})
+                _log.exception("action provider failed", extra={"provider": module_name})
 
     # -- lifecycle ---------------------------------------------------------
 

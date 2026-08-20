@@ -70,7 +70,7 @@ async def _real(config: FieldDeckConfig) -> list[Driver]:
         except ImportError as exc:
             _log.info(
                 "transport unavailable",
-                extra={"module": module_name, "reason": str(exc)},
+                extra={"provider": module_name, "reason": str(exc)},
             )
             continue
         factory = getattr(module, factory_name, None)
@@ -79,7 +79,7 @@ async def _real(config: FieldDeckConfig) -> list[Driver]:
         try:
             drivers.extend(factory(config))
         except Exception:  # noqa: BLE001 - one bad transport must not hide the others
-            _log.exception("provider failed", extra={"module": module_name})
+            _log.exception("provider failed", extra={"provider": module_name})
     return drivers
 
 
