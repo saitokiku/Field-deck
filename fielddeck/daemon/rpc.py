@@ -1,19 +1,32 @@
 """Unix-domain-socket RPC server.
 
-Two listening sockets, and the difference between them is a real security
-boundary rather than a convention:
+Two listening sockets:
 
-``instrumentd.sock`` (mode 0660, group ``fielddeck``)
+``instrumentd.sock``
     The full control surface.  The HMI and ``fdctl`` use it.
 
-``instrumentd-ai.sock`` (mode 0660, optional)
-    Every request on this socket is stamped ``source=claude`` by the server,
-    and the authorization methods are refused at the transport.  An AI client
-    cannot arm FieldDeck by claiming to be the HMI, because the socket it can
-    reach does not accept ``safety.arm`` at all.
+``instrumentd-ai.sock``
+    Every request is stamped ``source=claude`` by the server, and the
+    authorization methods are refused at the transport.  A client here cannot
+    arm FieldDeck even if its code tried to, and cannot launder its identity
+    by declaring itself the HMI.
 
-Neither socket is ever a TCP port.  The control API does not listen on the
-network.
+How strong that second boundary is depends on deployment, and it is worth
+being exact rather than reassuring:
+
+* **Out of the box** both sockets are mode 0660, group ``fielddeck``.  The
+  restricted socket then constrains the AI *client* — the MCP server has no
+  code path to arming — but a process running as an operator account in the
+  ``fielddeck`` group could open the main socket instead.  The boundary is
+  real against a confused or over-eager assistant, not against a hostile
+  local process already running as the operator.
+* **Hardened** the restricted socket is given its own group
+  (``restricted_group``) and the MCP server runs as a user that belongs to
+  that group and not to ``fielddeck``.  Then it is a kernel-enforced boundary:
+  the process cannot open the full socket at all.
+
+``docs/mcp.md`` covers the hardened setup.  Neither socket is ever a TCP
+port; the control API does not listen on the network.
 """
 
 from __future__ import annotations
@@ -147,6 +160,10 @@ class RpcServer:
         group: str | None = "fielddeck",
         mode: int = 0o660,
         restricted_socket_path: Path | None = None,
+        #: Own group for the restricted socket.  Set it, and run the MCP
+        #: server as a user in only that group, to make the AI boundary
+        #: kernel-enforced rather than a matter of client configuration.
+        restricted_group: str | None = None,
         restricted_source: ClientSource = ClientSource.CLAUDE,
         on_disconnect: Callable[[ClientConnection], Awaitable[None]] | None = None,
     ) -> None:
@@ -155,6 +172,7 @@ class RpcServer:
         self._restricted_path = restricted_socket_path
         self._restricted_source = restricted_source
         self._group = group
+        self._restricted_group = restricted_group
         self._mode = mode
         self._on_disconnect = on_disconnect
         self._servers: list[asyncio.AbstractServer] = []
@@ -174,11 +192,17 @@ class RpcServer:
                     self._restricted_path,
                     forced_source=self._restricted_source,
                     allow_authorization=False,
+                    group=self._restricted_group or self._group,
                 )
             )
 
     async def _listen(
-        self, path: Path, *, forced_source: ClientSource | None, allow_authorization: bool
+        self,
+        path: Path,
+        *,
+        forced_source: ClientSource | None,
+        allow_authorization: bool,
+        group: str | None = None,
     ) -> asyncio.AbstractServer:
         # Socket setup is one-shot at startup; the blocking filesystem calls
         # here are measured in microseconds and happen before we serve anyone.
@@ -195,7 +219,7 @@ class RpcServer:
             )
 
         server = await asyncio.start_unix_server(on_client, path=str(path))
-        self._harden(path)
+        self._harden(path, group)
         _log.info(
             "listening",
             extra={
@@ -206,21 +230,21 @@ class RpcServer:
         )
         return server
 
-    def _harden(self, path: Path) -> None:
+    def _harden(self, path: Path, group: str | None) -> None:
         """Group-restricted socket.  Never world-writable."""
         try:
             path.chmod(self._mode)
         except OSError as exc:  # pragma: no cover - unusual filesystems
             _log.warning("could not set socket mode", extra={"path": str(path), "error": str(exc)})
-        if not self._group:
+        if not group:
             return
         try:
-            gid = grp.getgrnam(self._group).gr_gid
+            gid = grp.getgrnam(group).gr_gid
             os.chown(path, -1, gid)
         except (KeyError, PermissionError, OSError):
             # Developer laptops have no fielddeck group; the socket is still
             # owner-only-ish under 0660 and lives in a private runtime dir.
-            _log.debug("socket group not applied", extra={"group": self._group})
+            _log.debug("socket group not applied", extra={"group": group})
 
     async def _serve_client(
         self,

@@ -114,6 +114,10 @@ class InstrumentDaemon:
             self._handle_rpc,
             socket_path=self._socket_path,
             restricted_socket_path=self._restricted_socket_path,
+            # Set FIELDDECK_AI_GROUP and run the MCP server as a user in only
+            # that group to make the AI boundary kernel-enforced rather than a
+            # matter of how the client is configured.
+            restricted_group=os.environ.get("FIELDDECK_AI_GROUP") or None,
             on_disconnect=self._on_disconnect,
         )
         self._safety_task: asyncio.Task[None] | None = None
