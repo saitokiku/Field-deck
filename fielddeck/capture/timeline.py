@@ -16,6 +16,7 @@ fsyncs instead of capturing.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from collections.abc import Iterable, Sequence
@@ -185,7 +186,8 @@ class Timeline:
         device_id: str | None = None,
         limit: int = 5000,
     ) -> list[dict[str, Any]]:
-        clauses, args = [], []
+        clauses: list[str] = []
+        args: list[Any] = []
         if quantity:
             clauses.append("quantity=?")
             args.append(quantity)
@@ -195,7 +197,10 @@ class Timeline:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         args.append(limit)
         rows = self._conn.execute(
-            f"SELECT * FROM measurements {where} ORDER BY monotonic_ns LIMIT ?", args  # noqa: S608
+            # `where` is assembled only from fixed column names below; every
+            # caller-supplied value goes through a ? placeholder in `args`.
+            f"SELECT * FROM measurements {where} ORDER BY monotonic_ns LIMIT ?",  # noqa: S608
+            args,
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -283,6 +288,7 @@ class Timeline:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         args.extend([limit, offset])
         rows = self._conn.execute(
+            # Same as above: fixed column names only, values are parameterised.
             f"SELECT * FROM events {where} ORDER BY monotonic_ns, seq LIMIT ? OFFSET ?",  # noqa: S608
             args,
         ).fetchall()
@@ -362,20 +368,18 @@ class Timeline:
     def _row(row: sqlite3.Row) -> TimelineRow:
         item = TimelineRow(row)
         if item.get("payload"):
-            try:
+            with contextlib.suppress(json.JSONDecodeError):
                 item["payload"] = json.loads(item["payload"])
-            except json.JSONDecodeError:  # pragma: no cover - defensive
-                pass
         return item
 
     # -- lifecycle ---------------------------------------------------------
 
     def close(self) -> None:
         self.flush()
-        try:
+        # Fold the WAL back into the main file so a copied session directory
+        # is self-contained even if the -wal file is left behind.
+        with contextlib.suppress(sqlite3.Error):
             self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        except sqlite3.Error:  # pragma: no cover - best effort
-            pass
         self._conn.close()
 
     def __enter__(self) -> Timeline:

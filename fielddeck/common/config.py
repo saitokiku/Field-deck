@@ -27,10 +27,18 @@ from fielddeck.common.paths import Paths, default_paths
 __all__ = [
     "FieldDeckConfig",
     "SafetyConfig",
+    "compression_available_note",
     "load_config",
     "load_safety_config",
     "simulation_enabled",
 ]
+
+
+def compression_available_note() -> str:
+    """Which codec the append-only logs will actually use on this install."""
+    from fielddeck.capture.storage import compression_available
+
+    return compression_available()
 
 
 def simulation_enabled() -> bool:
@@ -276,9 +284,7 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise ConfigurationError(
-            f"cannot read {path}: {exc}", details={"path": str(path)}
-        ) from exc
+        raise ConfigurationError(f"cannot read {path}: {exc}", details={"path": str(path)}) from exc
     try:
         data = yaml.safe_load(text)
     except yaml.YAMLError as exc:

@@ -378,7 +378,9 @@ class SafetyLimit(StrictModel):
     def violation(self, value: float) -> str | None:
         """Return a human explanation if ``value`` is out of bounds."""
         if self.maximum is not None and value > self.maximum:
-            return f"{self.quantity}={value:g}{self.unit} exceeds maximum {self.maximum:g}{self.unit}"
+            return (
+                f"{self.quantity}={value:g}{self.unit} exceeds maximum {self.maximum:g}{self.unit}"
+            )
         if self.minimum is not None and value < self.minimum:
             return f"{self.quantity}={value:g}{self.unit} below minimum {self.minimum:g}{self.unit}"
         return None

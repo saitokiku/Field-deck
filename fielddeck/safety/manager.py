@@ -256,9 +256,7 @@ class SafetyManager:
         )
         return leases
 
-    def acknowledge_estop(
-        self, *, source: ClientSource, session_id: str | None = None
-    ) -> None:
+    def acknowledge_estop(self, *, source: ClientSource, session_id: str | None = None) -> None:
         self.estop_controller.acknowledge(source)
         self._emit(
             new_event(

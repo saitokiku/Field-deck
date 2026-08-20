@@ -16,12 +16,12 @@ import secrets
 from pathlib import Path
 from typing import Any
 
+from fielddeck.capture.storage import AppendLog, SessionLayout, sha256_file
+from fielddeck.capture.timeline import Timeline
 from fielddeck.common.events import Event
 from fielddeck.common.logging import get_logger
 from fielddeck.common.models import CaptureArtifact, ClientSource, Session, SessionMark
 from fielddeck.common.timebase import TimeAnchor, Timestamp
-from fielddeck.capture.storage import AppendLog, SessionLayout, sha256_file
-from fielddeck.capture.timeline import Timeline
 
 __all__ = ["SessionRecorder"]
 
@@ -65,7 +65,7 @@ class SessionRecorder:
                 self._audit.write(record)
                 self._audit.flush()
                 self.timeline.flush()
-        except Exception:  # noqa: BLE001 - logged, never propagated to the bus
+        except Exception:
             _log.exception("failed to record event", extra={"session": self.session.id})
 
     # -- marks and notes ---------------------------------------------------

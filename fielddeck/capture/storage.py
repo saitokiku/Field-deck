@@ -11,6 +11,7 @@ otherwise, so a minimal install still works.
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 import hashlib
 import json
@@ -30,10 +31,11 @@ __all__ = [
     "sha256_file",
 ]
 
+_zstd: Any | None
 try:  # pragma: no cover - presence depends on the install extra
     import zstandard as _zstd
 except ImportError:  # pragma: no cover
-    _zstd = None  # type: ignore[assignment]
+    _zstd = None
 
 
 def compression_available() -> str:
@@ -170,7 +172,7 @@ class AppendLog:
             self._writer = _zstd.ZstdCompressor(level=6).stream_writer(self._raw)
         else:
             self._raw = None
-            self._writer = gzip.open(self.path, "ab")
+            self._writer = gzip.open(self.path, "ab")  # noqa: SIM115 - long-lived handle
         return self
 
     def write(self, record: dict[str, Any]) -> None:
@@ -201,15 +203,11 @@ class AppendLog:
             return
         self._closed = True
         if self._writer is not None:
-            try:
+            with contextlib.suppress(ValueError, OSError):
                 self._writer.close()
-            except (ValueError, OSError):  # pragma: no cover
-                pass
         if self._raw is not None and self._raw is not self._writer:
-            try:
+            with contextlib.suppress(ValueError, OSError):
                 self._raw.close()
-            except (ValueError, OSError):  # pragma: no cover
-                pass
 
     def __enter__(self) -> AppendLog:
         return self.open()

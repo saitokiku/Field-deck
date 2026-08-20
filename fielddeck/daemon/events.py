@@ -48,9 +48,7 @@ class Subscription:
     def wants(self, event: Event) -> bool:
         if self._types is not None and event.type not in self._types:
             return False
-        if self._session_id is not None and event.session_id != self._session_id:
-            return False
-        return True
+        return not (self._session_id is not None and event.session_id != self._session_id)
 
     def offer(self, event: Event) -> None:
         """Never blocks.  Drops the oldest event when the consumer lags."""
@@ -108,7 +106,7 @@ class EventBus:
         for sink in list(self._sinks):
             try:
                 sink(event)
-            except Exception:  # noqa: BLE001 - a broken sink must not stop the bus
+            except Exception:
                 _log.exception("event sink failed", extra={"event_type": str(event.type)})
         for subscription in list(self._subscriptions):
             subscription.offer(event)

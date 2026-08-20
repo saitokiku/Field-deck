@@ -174,7 +174,7 @@ class SessionManager:
 
     # -- reading -----------------------------------------------------------
 
-    def list(self, *, limit: int = 50) -> list[dict[str, Any]]:
+    def list_sessions(self, *, limit: int = 50) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for path in sorted(self.sessions_dir.iterdir(), reverse=True):
             if not path.is_dir() or not (path / "session.json").exists():
@@ -246,7 +246,7 @@ class SessionManager:
         if self._recorder is not None:
             try:
                 self.stop(source=source)
-            except Exception:  # noqa: BLE001 - shutdown must not raise
+            except Exception:
                 _log.exception("failed to close session cleanly")
                 if self._recorder is not None:
                     self._recorder.close()

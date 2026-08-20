@@ -23,7 +23,7 @@ from fielddeck.common.config import SafetyConfig
 from fielddeck.common.errors import SafetyLimitExceeded
 from fielddeck.common.models import SafetyLimit
 
-__all__ = ["LimitCheck", "LimitEnforcer"]
+__all__ = ["DerivedLimitCheck", "LimitCheck", "LimitEnforcer"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +38,30 @@ class LimitCheck:
     quantity: str
     #: When False a missing parameter is fine (e.g. an optional setpoint).
     required: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class DerivedLimitCheck:
+    """A limit on a quantity computed from several parameters.
+
+    24 V and 3 A can each sit inside their own limits while 72 W is not what
+    the operator meant to put into a DUT.  Declaring this on the action rather
+    than computing it inside a driver means it cannot be forgotten.
+    """
+
+    quantity: str
+    params: tuple[str, ...]
+    op: str = "product"
+
+    def compute(self, values: Sequence[float]) -> float:
+        if self.op == "product":
+            result = 1.0
+            for value in values:
+                result *= value
+            return result
+        if self.op == "sum":
+            return float(sum(values))
+        raise ValueError(f"unknown derived limit op {self.op!r}")
 
 
 class LimitEnforcer:
@@ -100,6 +124,27 @@ class LimitEnforcer:
                     preserved="no command was sent to the device",
                 ) from exc
             self.check_value(check.quantity, value, device_id=device_id)
+
+    def check_derived(
+        self,
+        params: Mapping[str, Any],
+        checks: Sequence[DerivedLimitCheck],
+        *,
+        device_id: str | None = None,
+    ) -> None:
+        """Evaluate every declared derived limit for one action request."""
+        for check in checks:
+            values: list[float] = []
+            for name in check.params:
+                raw = params.get(name)
+                if raw is None:
+                    break
+                try:
+                    values.append(float(raw))
+                except (TypeError, ValueError):
+                    break
+            else:
+                self.check_value(check.quantity, check.compute(values), device_id=device_id)
 
     def check_derived_power(
         self,

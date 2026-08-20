@@ -34,9 +34,11 @@ _SECRET_HINTS = (
 
 _REDACTED = "***redacted***"
 
-_STANDARD_ATTRS = frozenset(
-    logging.LogRecord("", 0, "", 0, "", (), None).__dict__
-) | {"message", "asctime", "taskName"}
+_STANDARD_ATTRS = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {
+    "message",
+    "asctime",
+    "taskName",
+}
 
 
 def redact(value: Any, *, _depth: int = 0) -> Any:
@@ -88,7 +90,10 @@ class TextFormatter(logging.Formatter):
     _FIELDS = ("session", "device", "action", "permission", "source", "request_id", "duration_ms")
 
     def format(self, record: logging.LogRecord) -> str:
-        head = f"{format_utc_ns(utc_ns())} {record.levelname:<8} {record.name:<24} {record.getMessage()}"
+        head = (
+            f"{format_utc_ns(utc_ns())} {record.levelname:<8} "
+            f"{record.name:<24} {record.getMessage()}"
+        )
         extras = [
             f"{name}={redact({name: record.__dict__[name]})[name]}"
             for name in self._FIELDS
@@ -109,7 +114,9 @@ def configure_logging(level: str = "INFO", *, json_output: bool | None = None) -
     level = os.environ.get("FIELDDECK_LOG_LEVEL", level).upper()
     if json_output is None:
         env = os.environ.get("FIELDDECK_LOG_JSON")
-        json_output = env.strip().lower() in {"1", "true", "yes"} if env else not sys.stderr.isatty()
+        json_output = (
+            env.strip().lower() in {"1", "true", "yes"} if env else not sys.stderr.isatty()
+        )
 
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(JsonFormatter() if json_output else TextFormatter())

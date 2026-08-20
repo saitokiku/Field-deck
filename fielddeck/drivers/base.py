@@ -18,9 +18,7 @@ import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
-
-from pydantic import BaseModel
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, cast
 
 from fielddeck.common.errors import UnsupportedCapability
 from fielddeck.common.events import Event
@@ -34,7 +32,8 @@ from fielddeck.common.models import (
     StrictModel,
     TransportKind,
 )
-from fielddeck.safety.limits import LimitCheck
+from fielddeck.safety.limits import DerivedLimitCheck, LimitCheck
+from pydantic import BaseModel
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from fielddeck.capture.recorder import SessionRecorder
@@ -127,6 +126,8 @@ class ActionSpec:
     cancelable: bool = False
     timeout_s: float = 10.0
     limit_checks: tuple[LimitCheck, ...] = ()
+    #: Limits on quantities computed from several parameters, e.g. V x I.
+    derived_limit_checks: tuple[DerivedLimitCheck, ...] = ()
     #: True only for actions that move hardware *toward* safety.
     allowed_during_estop: bool = False
     safe_state_note: str | None = None
@@ -175,6 +176,7 @@ class _ActionMeta:
     cancelable: bool
     timeout_s: float
     limit_checks: tuple[LimitCheck, ...]
+    derived_limit_checks: tuple[DerivedLimitCheck, ...]
     allowed_during_estop: bool
     safe_state_note: str | None
     permission_resolver: Callable[[BaseModel], PermissionLevel] | None
@@ -194,6 +196,7 @@ def action(
     cancelable: bool = False,
     timeout_s: float = 10.0,
     limit_checks: Sequence[LimitCheck] = (),
+    derived_limit_checks: Sequence[DerivedLimitCheck] = (),
     allowed_during_estop: bool = False,
     safe_state_note: str | None = None,
     permission_resolver: Callable[[Any], PermissionLevel] | None = None,
@@ -215,6 +218,7 @@ def action(
             cancelable=cancelable,
             timeout_s=timeout_s,
             limit_checks=tuple(limit_checks),
+            derived_limit_checks=tuple(derived_limit_checks),
             allowed_during_estop=allowed_during_estop,
             safe_state_note=safe_state_note,
             permission_resolver=permission_resolver,
@@ -232,6 +236,7 @@ def collect_actions(obj: object, *, device_id: str | None = None) -> dict[str, A
         meta: _ActionMeta | None = getattr(member, "_fielddeck_action", None)
         if meta is None:
             continue
+        handler = cast(Handler, member)
         if meta.name in specs:
             raise RuntimeError(f"duplicate action {meta.name} on {type(obj).__name__}")
         specs[meta.name] = ActionSpec(
@@ -239,11 +244,12 @@ def collect_actions(obj: object, *, device_id: str | None = None) -> dict[str, A
             description=meta.description,
             permission=meta.permission,
             params_model=meta.params_model,
-            handler=member,
+            handler=handler,
             state_changing=meta.state_changing,
             cancelable=meta.cancelable,
             timeout_s=meta.timeout_s,
             limit_checks=meta.limit_checks,
+            derived_limit_checks=meta.derived_limit_checks,
             allowed_during_estop=meta.allowed_during_estop,
             safe_state_note=meta.safe_state_note,
             permission_resolver=meta.permission_resolver,

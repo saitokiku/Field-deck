@@ -84,9 +84,10 @@ def default_paths() -> Paths:
         state_dir = _env_path("FIELDDECK_STATE_DIR") or _SYSTEM_STATE
         runtime_dir = _env_path("FIELDDECK_RUNTIME_DIR") or _SYSTEM_RUNTIME
     else:
-        home = Path(
-            os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
-        ).expanduser() / "fielddeck"
+        home = (
+            Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")).expanduser()
+            / "fielddeck"
+        )
         config_dir = _env_path("FIELDDECK_CONFIG_DIR") or home / "config"
         state_dir = _env_path("FIELDDECK_STATE_DIR") or home / "state"
         runtime_dir = _env_path("FIELDDECK_RUNTIME_DIR") or home / "run"
