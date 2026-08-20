@@ -25,6 +25,7 @@ from typing import Any
 
 from fielddeck.common.events import Event
 from fielddeck.common.models import CaptureArtifact, SessionMark
+from fielddeck.common.timebase import monotonic_ns
 
 __all__ = ["Timeline", "TimelineRow"]
 
@@ -105,9 +106,16 @@ class TimelineRow(dict):
 class Timeline:
     """Session-scoped SQLite store with batched event writes."""
 
-    def __init__(self, path: Path, *, batch_size: int = 64) -> None:
+    def __init__(self, path: Path, *, batch_size: int = 64, max_batch_age_s: float = 1.0) -> None:
         self.path = path
         self._batch_size = batch_size
+        #: Batching trades durability for throughput. Bounding the batch by
+        #: *age* as well as count keeps that trade honest: on a quiet session
+        #: a count-only trigger can hold events in memory indefinitely, and a
+        #: field instrument that loses power then loses exactly the records
+        #: leading up to whatever caused it.
+        self._max_batch_age_ns = int(max_batch_age_s * 1e9)
+        self._last_flush_ns = monotonic_ns()
         self._pending: list[tuple[Any, ...]] = []
         self._conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
@@ -146,10 +154,14 @@ class Timeline:
                 json.dumps(event.payload, default=str) if event.payload else None,
             )
         )
-        if len(self._pending) >= self._batch_size:
+        if (
+            len(self._pending) >= self._batch_size
+            or monotonic_ns() - self._last_flush_ns >= self._max_batch_age_ns
+        ):
             self.flush()
 
     def flush(self) -> None:
+        self._last_flush_ns = monotonic_ns()
         if not self._pending:
             return
         batch, self._pending = self._pending, []

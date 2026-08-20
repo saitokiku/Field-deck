@@ -50,6 +50,9 @@ _log = get_logger("fielddeck.daemon.service")
 #: POWER lease drops the output promptly, cheap enough to idle at ~0% CPU.
 SAFETY_TICK_S = 0.25
 
+#: Flush the session recorder every fourth tick, i.e. about once a second.
+_FLUSH_EVERY_TICKS = 4
+
 #: Subsystems that contribute daemon-level actions.  Each is
 #: ``(module, factory)`` where the factory takes the daemon and returns a
 #: ``{name: ActionSpec}`` mapping.  A subsystem whose optional dependency is
@@ -244,8 +247,15 @@ class InstrumentDaemon:
     async def _safety_loop(self) -> None:
         """Reap expired grants and leases; drive safe state on lapse."""
         try:
+            ticks = 0
             while True:
                 await asyncio.sleep(SAFETY_TICK_S)
+                ticks += 1
+                # Bound how much of the timeline an unclean shutdown can cost.
+                # Power loss on a field device is a normal event, not an edge
+                # case, and the records just before it are the valuable ones.
+                if ticks % _FLUSH_EVERY_TICKS == 0 and self.sessions.recorder is not None:
+                    self.sessions.recorder.flush()
                 _grants, leases = self.safety.sweep()
                 if leases:
                     await self.dispatcher.apply_safe_state(
