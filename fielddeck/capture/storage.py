@@ -135,14 +135,35 @@ class SessionLayout:
         return str(path.resolve().relative_to(self.root.resolve()))
 
     def next_filename(self, kind: str, stem: str, suffix: str) -> Path:
-        """``can/can0-0001.log`` — never overwrites an existing capture."""
+        """``can/can0-0001.log`` — never overwrites an existing capture.
+
+        Storage failures are translated here rather than escaping as a bare
+        OSError: sessions routinely live on an external SSD, and "the drive
+        you were recording to is gone" deserves to say so, and to say what is
+        still on disk.
+        """
         directory = self.root / kind
-        directory.mkdir(parents=True, exist_ok=True)
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise CaptureError(
+                f"cannot write to {directory}: {exc}. If the session store is on "
+                "removable media, check that it is still mounted.",
+                details={"path": str(directory), "errno": exc.errno},
+                preserved="everything already written to this session is untouched",
+            ) from exc
         index = 1
         while True:
             candidate = directory / f"{stem}-{index:04d}{suffix}"
-            if not candidate.exists():
-                return candidate
+            try:
+                if not candidate.exists():
+                    return candidate
+            except OSError as exc:  # pragma: no cover - media vanished mid-scan
+                raise CaptureError(
+                    f"cannot inspect {directory}: {exc}",
+                    details={"path": str(directory), "errno": exc.errno},
+                    preserved="everything already written to this session is untouched",
+                ) from exc
             index += 1
 
 
