@@ -66,6 +66,13 @@ class CanStatsParams(DeviceParams):
     duration_s: float = Field(default=2.0, gt=0, le=60)
 
 
+class CanDecodeParams(DeviceParams):
+    dbc: str = Field(description="Path to a .dbc/.kcd/.sym database")
+    path: str = Field(description="Capture file, relative to the session directory")
+    label: str = Field(default="decoded", max_length=64)
+    max_frames: int = Field(default=500_000, ge=1, le=20_000_000)
+
+
 #: (arbitration id, period, jitter, dlc, description)
 _TRAFFIC = (
     (0x101, 0.010, 0.0004, 8, "motor command"),
@@ -325,6 +332,62 @@ class SimCanDriver(SimulatedDeviceMixin, Driver):
             "bus_load_percent": round(
                 min(100.0, listen["count"] * 128 / (self.bitrate * params.duration_s) * 100), 1
             ),
+        }
+
+    @action(
+        "can.decode",
+        permission=PermissionLevel.PASSIVE,
+        params=CanDecodeParams,
+        state_changing=False,
+        description="Decode a stored capture against a DBC into a derived artifact.",
+        allowed_during_estop=True,
+        timeout_s=300.0,
+    )
+    async def can_decode(self, ctx: ActionContext, params: CanDecodeParams) -> dict[str, Any]:
+        """Post-processing over a file that already exists.
+
+        Shares the real transport's implementation so a decode in simulation
+        exercises the same code an engineer will run against a vehicle.
+        """
+        import asyncio
+
+        from fielddeck.common.errors import CaptureError
+        from fielddeck.transports.socketcan import decode_capture_file
+
+        if ctx.recorder is None:
+            raise CaptureError("decoding writes into a session; start one first")
+        root = ctx.recorder.root.resolve()
+        source = (root / params.path).resolve()
+        if not source.is_relative_to(root) or not source.is_file():
+            raise CaptureError(
+                f"no capture at {params.path}",
+                details={"session": ctx.recorder.session_id},
+                preserved="no file was read",
+            )
+        out = ctx.recorder.capture_path("can", f"{source.stem}-{params.label}", ".csv")
+        summary, dbc_path, dbc_hash = await asyncio.to_thread(
+            decode_capture_file, params.dbc, source, out, params.max_frames
+        )
+        sources = [
+            row["artifact_id"]
+            for row in ctx.recorder.timeline.artifacts()
+            if row["relative_path"] == params.path
+        ]
+        artifact = ctx.recorder.add_artifact(
+            out,
+            kind="can",
+            media_type="text/csv",
+            device_id=self.device_id,
+            raw=False,
+            source_artifact_ids=sources,
+            producer="cantools",
+            producer_config={"dbc": dbc_path.name, "dbc_sha256": dbc_hash},
+        )
+        return {
+            **summary,
+            "artifact": artifact.model_dump(mode="json"),
+            "derived_from": params.path,
+            "dbc_sha256": dbc_hash,
         }
 
     @action(

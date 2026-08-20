@@ -1407,6 +1407,28 @@ def _resolve_capture(recorder: SessionRecorder, params: CanDecodeParams) -> tupl
     return resolved, None
 
 
+def decode_capture_file(
+    dbc: str, source: Path, destination: Path, max_frames: int = 500_000
+) -> tuple[dict[str, Any], Path, str]:
+    """Decode a candump capture against a DBC, off the event loop.
+
+    Public because decoding is pure post-processing over a file that already
+    exists — it needs no CAN interface, so the simulated bus exposes the same
+    ``can.decode`` action through this function.  A headline feature that only
+    works when hardware is plugged in is a feature nobody evaluates.
+
+    Returns ``(summary, dbc_path, dbc_sha256)``.
+    """
+    cantools = _load_cantools()
+    if cantools is None:
+        raise UnsupportedCapability(
+            "cantools is not installed; install with: pip install 'fielddeck[can]'",
+            details={"module": "cantools"},
+        )
+    database, dbc_path, dbc_hash = _load_database(cantools, dbc)
+    return _decode_file(database, source, destination, max_frames), dbc_path, dbc_hash
+
+
 def _decode_file(database: Any, source: Path, destination: Path, max_frames: int) -> dict[str, Any]:
     """Decode a candump log into a CSV of signal values.
 

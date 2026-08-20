@@ -1,0 +1,22 @@
+VERSION "FieldDeck simulated bench"
+
+NS_ :
+
+BS_:
+
+BU_: MotorController Diagnostics
+
+BO_ 257 MotorCommand: 8 MotorController
+ SG_ Counter : 0|8@1+ (1,0) [0|255] "" Diagnostics
+ SG_ TargetSpeed : 8|16@1+ (0.5,0) [0|32767] "rpm" Diagnostics
+ SG_ Checksum : 56|8@1+ (1,0) [0|255] "" Diagnostics
+
+BO_ 385 MotorStatus: 8 MotorController
+ SG_ Counter : 0|8@1+ (1,0) [0|255] "" Diagnostics
+ SG_ ActualSpeed : 8|16@1+ (0.5,0) [0|32767] "rpm" Diagnostics
+ SG_ Current : 24|16@1+ (0.001,0) [0|65] "A" Diagnostics
+ SG_ Checksum : 56|8@1+ (1,0) [0|255] "" Diagnostics
+
+BO_ 640 Diagnostics: 4 MotorController
+ SG_ FaultCode : 0|16@1+ (1,0) [0|65535] "" Diagnostics
+ SG_ Checksum : 24|8@1+ (1,0) [0|255] "" Diagnostics
