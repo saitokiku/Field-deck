@@ -30,8 +30,20 @@ def _env_path(name: str) -> Path | None:
 
 
 def _system_install() -> bool:
-    """True when the deployed layout exists and is usable by this process."""
-    return _SYSTEM_STATE.is_dir() and os.access(_SYSTEM_STATE, os.W_OK)
+    """True when the deployed layout is present on this machine.
+
+    Detected by **existence**, deliberately not by writability.  On a real
+    install ``/var/lib/fielddeck`` belongs to the daemon's own system user at
+    mode 0750: an operator is in the ``fielddeck`` group, so they can open the
+    control socket, but they cannot write to the state directory.  Keying this
+    off write access sent every non-root client looking for the socket under
+    its own home directory, where no daemon has ever listened, and ``fdctl``
+    reported "instrumentd is not running" on a perfectly healthy unit.
+
+    A developer who has FieldDeck installed *and* wants a private instance
+    sets ``FIELDDECK_HOME``, which is checked before this function.
+    """
+    return _SYSTEM_STATE.is_dir() or _SYSTEM_RUNTIME.is_dir()
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,9 +76,24 @@ class Paths:
         return self.config_dir / "instruments"
 
     def ensure(self) -> Paths:
-        """Create the directories this process needs.  Idempotent."""
+        """Create the directories this process needs.  Idempotent.
+
+        Only the daemon calls this.  Clients resolve paths without creating
+        anything, because a client has no business writing to the state store
+        and usually lacks permission to.
+        """
         for path in (self.state_dir, self.sessions_dir, self.runtime_dir, self.log_dir):
-            path.mkdir(parents=True, exist_ok=True)
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+            except PermissionError as exc:
+                from fielddeck.common.errors import ConfigurationError
+
+                raise ConfigurationError(
+                    f"cannot create {path}: {exc}. Run instrumentd as the "
+                    "'fielddeck' user, or set FIELDDECK_HOME to a directory you "
+                    "own for a private development instance.",
+                    details={"path": str(path)},
+                ) from exc
         return self
 
 
@@ -103,6 +130,19 @@ def default_paths() -> Paths:
 
 
 def socket_path() -> Path:
-    """The control socket, honouring ``FIELDDECK_SOCKET``."""
+    """The control socket, honouring ``FIELDDECK_SOCKET``.
+
+    When no layout has been forced, a socket that actually exists wins over
+    one that merely would have been correct.  Being unable to find a running
+    daemon is the single most annoying failure a CLI can have.
+    """
     override = _env_path("FIELDDECK_SOCKET")
-    return override if override is not None else default_paths().socket
+    if override is not None:
+        return override
+
+    candidate = default_paths().socket
+    if candidate.exists() or os.environ.get("FIELDDECK_HOME"):
+        return candidate
+
+    deployed = _SYSTEM_RUNTIME / "instrumentd.sock"
+    return deployed if deployed.exists() else candidate
