@@ -319,8 +319,10 @@ class RecipeRunner:
             )
         self._check_authorization(safety)
 
-        status = await self.client.call("system.status")
-        session = status.get("session")
+        # system.status is an action, not an RPC method: even the runner's own
+        # bookkeeping goes through the dispatcher and lands in the audit trail.
+        status = await self.client.execute("system.status", {})
+        session = status.result.get("session")
         self._session_id = session.get("id") if isinstance(session, dict) else None
         if self._session_id is None and self.open_session and not self.dry_run:
             await self._start_session()

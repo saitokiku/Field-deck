@@ -1,0 +1,72 @@
+# Power a controller up, watch it talk, and put the rail back down again.
+#
+# This is the shape a bring-up procedure should have: the supply is set before
+# it is enabled, the bus is observed rather than driven, and the output is
+# turned off in `finally` so it happens whether the test passes, fails, is
+# cancelled or is stopped by the emergency stop.
+#
+# Reaches POWER (and QUERY, because reading an instrument means transmitting to
+# it), so an operator must arm both first — authorization is exact-class, and a
+# POWER grant does not cover a QUERY action:
+#     fdctl arm query power --ttl 120
+#     fdctl recipe run controller-smoke-test
+#
+# Written against the simulated bench (FIELDDECK_SIM=1). On real hardware,
+# replace `sim:can:can0` with your interface's device id, which
+# `fdctl device list` will tell you.
+version: 1
+name: controller-smoke-test
+description: >-
+  Bring a controller up on 24 V, confirm it draws a sane current and puts
+  periodic traffic on CAN, then de-energise it.
+
+requires:
+  devices:
+    - role: psu
+      note: bench supply feeding the controller
+    - id: sim:can:can0
+      note: CAN interface listening to the controller
+
+# The envelope this test stays inside. It can only tighten what safety.yaml
+# allows; every setpoint below is checked against it at compile time, so a
+# voltage that would exceed it never reaches the instrument.
+limits:
+  voltage_max: 24.5
+  current_max: 1.0
+
+steps:
+  - action: session.mark
+    label: power-up
+
+  - action: psu.set
+    device: role:psu
+    voltage: 24.0
+    current_limit: 1.0
+
+  - action: psu.output
+    device: role:psu
+    enabled: true
+
+  - action: wait
+    seconds: 2
+
+  - action: psu.measure
+    device: role:psu
+
+  - assert:
+      expression: "psu.current > 0.05 and psu.current < 1.0"
+      message: "Supply current is outside the expected 0.05-1.0 A window"
+
+  - action: can.capture
+    device: sim:can:can0
+    duration_s: 5
+    label: smoke-test
+
+  - assert:
+      expression: "can.frames > 0"
+      message: "No CAN traffic observed"
+
+finally:
+  - action: psu.output
+    device: role:psu
+    enabled: false

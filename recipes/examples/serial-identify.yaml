@@ -1,0 +1,56 @@
+# Work out what is on the other end of a serial cable by listening to it.
+#
+# PASSIVE throughout: the port is configured at this end only, and not one byte
+# is sent to the DUT. Adding a `serial.send` step would raise the whole recipe
+# to CONTROL and require `fdctl arm control` — which is exactly the point of
+# doing the passive pass first.
+#
+# FieldDeck never infers the electrical class. TTL, RS-232 and RS-485 look
+# identical to software and are not interchangeable; confirm the adapter
+# physically before trusting anything below.
+#
+#     fdctl recipe run serial-identify
+version: 1
+name: serial-identify
+description: >-
+  Set the local port framing, record two seconds of the incoming stream, and
+  confirm the link is producing plausible traffic. Transmits nothing.
+
+requires:
+  devices:
+    - id: sim:serial:sim-uart-0
+      note: the adapter connected to the DUT
+
+steps:
+  - mark: serial-identify
+
+  - action: serial.configure
+    device: sim:serial:sim-uart-0
+    baudrate: 115200
+    bytesize: 8
+    parity: "N"
+    stopbits: 1
+
+  - assert:
+      expression: "serial.baudrate == 115200 and serial.framing == '8N1'"
+      message: "The port did not take the requested framing"
+
+  - action: serial.capture
+    device: sim:serial:sim-uart-0
+    duration_s: 2
+    label: identify
+
+  - assert:
+      expression: "serial.bytes > 0"
+      message: "Nothing arrived: wrong baud rate, wrong pins, or the DUT is silent"
+
+  - assert:
+      expression: "serial.chunks > 1"
+      message: "A single burst is not a running link; expected periodic traffic"
+
+  - note: >-
+      Raw bytes and an arrival-time index are in the session. Check framing
+      against the capture before concluding the baud rate is right.
+
+finally:
+  - mark: serial-identify-complete

@@ -206,7 +206,8 @@ class RecipeActions:
         answer it because you do not have it yet would be perverse.
         """
         plan = self._compile(self._load(params))
-        async with await self._connect() as client:
+        client = await self._connect()
+        try:
             runner = RecipeRunner(
                 client,
                 plan,
@@ -216,6 +217,8 @@ class RecipeActions:
                 deadline_s=params.deadline_s,
             )
             run = await runner.run()
+        finally:
+            await client.close()
         return {
             "ok": plan.ok and run.would_start,
             "would_start": run.would_start,
@@ -263,24 +266,27 @@ class RecipeActions:
                 preserved="no step was run and nothing was energised",
             )
 
-        async with await self._connect() as client:
-            runner = RecipeRunner(
-                client,
-                plan,
-                emit=ctx.emit,
-                open_session=params.open_session,
-                deadline_s=params.deadline_s,
-            )
-            self._runs[runner.run_id] = runner
-            # A cancel or an ESTOP reaches the dispatcher first and sets this
-            # event; the runner turns it into an orderly stop with cleanup
-            # rather than a dropped connection.
-            watcher = asyncio.ensure_future(self._forward_cancel(ctx, runner))
-            try:
-                run = await runner.run()
-            finally:
-                watcher.cancel()
-                self._runs.pop(runner.run_id, None)
+        client = await self._connect()
+        runner = RecipeRunner(
+            client,
+            plan,
+            emit=ctx.emit,
+            open_session=params.open_session,
+            deadline_s=params.deadline_s,
+        )
+        self._runs[runner.run_id] = runner
+        # A cancel or an ESTOP reaches the dispatcher first and sets this event;
+        # the runner turns it into an orderly stop with cleanup rather than a
+        # dropped connection.
+        watcher = asyncio.ensure_future(self._forward_cancel(ctx, runner))
+        try:
+            run = await runner.run()
+        finally:
+            watcher.cancel()
+            self._runs.pop(runner.run_id, None)
+            # Closing last: the connection is what the output leases are tied
+            # to, so it outlives the cleanup steps that release them.
+            await client.close()
         return run.model_dump(mode="json")
 
     @action(

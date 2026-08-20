@@ -1,0 +1,60 @@
+# Characterise a CAN bus without transmitting a single frame.
+#
+# Everything here is PASSIVE: it needs no authorization, it runs while the
+# emergency stop is latched, and it is safe to point at a bus whose state you
+# do not yet know. That is the order to work in — listen first, and only then
+# decide whether talking is a reasonable thing to do.
+#
+# Nothing in this recipe sets a bitrate by trying one. If the frame count comes
+# back zero, the bitrate is wrong, the wiring is wrong, or the bus is quiet;
+# guessing by transmitting is how you take down a live vehicle network.
+#
+#     fdctl recipe run can-bringup
+version: 1
+name: can-bringup
+description: >-
+  Listen to a CAN interface, record a capture, and report the per-id rate and
+  jitter. Transmits nothing.
+
+requires:
+  devices:
+    - id: sim:can:can0
+      note: the interface under test, in listen-only mode
+
+steps:
+  - mark: can-bringup
+    note: passive characterisation only
+
+  - action: can.status
+    device: sim:can:can0
+
+  - assert:
+      expression: "can.mode == 'listen-only'"
+      message: "The interface is not in listen-only mode; refusing to characterise a bus we might be driving"
+
+  # Two short samples rather than one long one: a bus that is only alive for
+  # the first sample is a different fault from a bus that is quiet throughout.
+  - repeat:
+      count: 2
+      steps:
+        - action: can.stats
+          device: sim:can:can0
+          duration_s: 1
+
+        - assert:
+            expression: "can.total_frames > 0"
+            message: "No frames observed; check bitrate, termination and wiring"
+
+  - action: can.capture
+    device: sim:can:can0
+    duration_s: 2
+    label: bringup
+
+  - assert:
+      expression: "can.frames > 10"
+      message: "Fewer frames than a periodic bus should produce in two seconds"
+
+  - note: "Capture stored in the session; decode it with can.decode and a DBC."
+
+finally:
+  - mark: can-bringup-complete
