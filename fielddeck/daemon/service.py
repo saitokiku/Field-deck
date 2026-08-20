@@ -57,6 +57,8 @@ SAFETY_TICK_S = 0.25
 _OPTIONAL_ACTION_PROVIDERS: tuple[tuple[str, str], ...] = (
     ("fielddeck.analysis.actions", "build_action_specs"),
     ("fielddeck.recipes.actions", "build_action_specs"),
+    ("fielddeck.capture.actions", "build_action_specs"),
+    ("fielddeck.debug.actions", "build_action_specs"),
 )
 
 
