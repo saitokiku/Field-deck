@@ -43,6 +43,9 @@ _REAL_PROVIDERS: tuple[tuple[str, str], ...] = (
     ("fielddeck.protocols.modbus", "discover_modbus_drivers"),
     ("fielddeck.capture.camera", "discover_camera_drivers"),
     ("fielddeck.capture.sigrok", "discover_logic_drivers"),
+    ("fielddeck.transports.gpio", "discover_gpio_drivers"),
+    ("fielddeck.transports.i2c", "discover_i2c_drivers"),
+    ("fielddeck.transports.spi", "discover_spi_drivers"),
 )
 
 

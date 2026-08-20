@@ -20,6 +20,8 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, cast
 
+from pydantic import BaseModel
+
 from fielddeck.common.errors import UnsupportedCapability
 from fielddeck.common.events import Event
 from fielddeck.common.models import (
@@ -33,7 +35,6 @@ from fielddeck.common.models import (
     TransportKind,
 )
 from fielddeck.safety.limits import DerivedLimitCheck, LimitCheck
-from pydantic import BaseModel
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from fielddeck.capture.recorder import SessionRecorder

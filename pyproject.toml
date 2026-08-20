@@ -91,7 +91,7 @@ filterwarnings = ["error::DeprecationWarning:fielddeck.*"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["fielddeck", "tests"]
+src = ["."]
 
 [tool.ruff.lint]
 select = [
