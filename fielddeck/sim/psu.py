@@ -265,14 +265,24 @@ class SimPsuDriver(SimulatedDeviceMixin, Driver):
         is not clearly a query gets rejected rather than guessed at, because
         ``OUTP ON`` looks harmless right up until it energises something.
         """
+        from fielddeck.bench.scpi import classify_scpi
         from fielddeck.common.errors import PermissionDenied
 
         command = params.command.strip()
-        if not command.endswith("?"):
+        # Not `endswith("?")`: SCPI allows several commands in one message, so
+        # `OUTP ON;*IDN?` ends in a question mark and would energise an output.
+        # classify_scpi checks every segment.
+        classification = classify_scpi(command)
+        if not classification.is_query:
             raise PermissionDenied(
-                f"{command!r} is not a query. Use the typed actions (psu.set, "
-                "psu.output) so the permission model can see what you are asking for.",
-                details={"command": command, "device_id": self.device_id},
+                f"{command!r} is not a query ({classification.reason}). Use the typed "
+                "actions (psu.set, psu.output) so the permission model can see what "
+                "you are asking for.",
+                details={
+                    "command": command,
+                    "device_id": self.device_id,
+                    "classification": str(classification.kind),
+                },
                 preserved="nothing was sent to the instrument",
             )
         upper = command.upper()
