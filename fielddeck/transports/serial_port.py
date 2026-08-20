@@ -389,7 +389,7 @@ class SerialDriver(Driver):
             self._read_error = None
             self._stop = asyncio.Event()
             self._reader = asyncio.create_task(
-                self._reader_loop(port), name=f"serial-reader:{self.device_id}"
+                self._reader_loop(port, self._stop), name=f"serial-reader:{self.device_id}"
             )
             self._set_state(ConnectionState.READY)
             _log.info(
@@ -498,7 +498,7 @@ class SerialDriver(Driver):
                 extra={"device": self.device_id, "path": self.path},
             )
 
-    async def _reader_loop(self, port: Any) -> None:
+    async def _reader_loop(self, port: Any, stop: asyncio.Event) -> None:
         """Drain the port into every subscriber.
 
         Runs for the lifetime of the open port.  With no subscribers the bytes
@@ -506,13 +506,16 @@ class SerialDriver(Driver):
         overflowing and guarantees that a monitor which starts later sees live
         bytes with trustworthy arrival times, not a backlog stamped "now".
         """
-        while not self._stop.is_set():
+        # ``stop`` is the event this reader was started with, not ``self._stop``:
+        # a reconfigure installs a fresh one, and a straggler thread must not
+        # decide it is still the live reader and publish alongside its replacement.
+        while not stop.is_set():
             try:
                 stamp, data = await asyncio.to_thread(self._blocking_read, port)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - any read failure ends the stream; subscribers are told
-                if not self._stop.is_set():
+                if not stop.is_set():
                     self._fail(exc)
                 return
             if not data:
@@ -763,7 +766,7 @@ class SerialDriver(Driver):
         finally:
             self._stop = asyncio.Event()
             self._reader = asyncio.create_task(
-                self._reader_loop(port), name=f"serial-reader:{self.device_id}"
+                self._reader_loop(port, self._stop), name=f"serial-reader:{self.device_id}"
             )
 
     @action(

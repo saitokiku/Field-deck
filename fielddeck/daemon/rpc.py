@@ -47,6 +47,13 @@ Handler = Callable[["ClientConnection", str, dict[str, Any]], Awaitable[Any]]
 #: the restricted socket.
 AUTHORIZATION_METHODS = frozenset({"safety.arm", "safety.disarm", "safety.estop_clear"})
 
+#: Requests one connection may have in flight at once. Requests are handled
+#: concurrently rather than one at a time, because a three-second CAN capture
+#: must not freeze the status poll queued behind it on the same socket. The
+#: bound exists so a client that floods the socket meets backpressure on the
+#: read loop instead of growing the task set without limit.
+MAX_INFLIGHT_PER_CONNECTION = 32
+
 
 class ClientConnection:
     """One connected client."""
@@ -73,6 +80,8 @@ class ClientConnection:
         self.subscriptions: dict[str, Any] = {}
         self._write_lock = asyncio.Lock()
         self._closed = False
+        self.inflight: set[asyncio.Task[None]] = set()
+        self._slots = asyncio.Semaphore(MAX_INFLIGHT_PER_CONNECTION)
 
     def resolve_source(self, declared: str | None) -> ClientSource:
         """Trust the declaration only where the socket permits it."""
@@ -87,6 +96,13 @@ class ClientConnection:
                 f"unknown client source {declared!r}",
                 details={"known": [str(s) for s in ClientSource]},
             ) from exc
+
+    async def acquire_slot(self) -> None:
+        """Wait for a free in-flight slot.  Applies backpressure to a flood."""
+        await self._slots.acquire()
+
+    def release_slot(self) -> None:
+        self._slots.release()
 
     async def send(self, data: bytes) -> None:
         if self._closed:
@@ -110,6 +126,11 @@ class ClientConnection:
         for task in list(self.subscriptions.values()):
             task.cancel()
         self.subscriptions.clear()
+        for task in list(self.inflight):
+            task.cancel()
+        if self.inflight:
+            await asyncio.gather(*self.inflight, return_exceptions=True)
+        self.inflight.clear()
         with contextlib.suppress(Exception):
             self.writer.close()
             await self.writer.wait_closed()
@@ -237,7 +258,12 @@ class RpcServer:
                     break
                 if not line.strip():
                     continue
-                await self._handle_line(connection, line)
+                # Acquiring before spawning applies backpressure to a client
+                # that floods, rather than letting the task set grow.
+                await connection.acquire_slot()
+                task = asyncio.create_task(self._dispatch(connection, line))
+                connection.inflight.add(task)
+                task.add_done_callback(connection.inflight.discard)
         finally:
             self._connections.discard(connection)
             if self._on_disconnect is not None:
@@ -245,6 +271,12 @@ class RpcServer:
                     await self._on_disconnect(connection)
             await connection.close()
             _log.debug("client disconnected", extra={"connection": connection.id})
+
+    async def _dispatch(self, connection: ClientConnection, line: bytes) -> None:
+        try:
+            await self._handle_line(connection, line)
+        finally:
+            connection.release_slot()
 
     async def _handle_line(self, connection: ClientConnection, line: bytes) -> None:
         request_id: str | None = None

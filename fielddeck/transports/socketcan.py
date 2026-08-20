@@ -1266,28 +1266,7 @@ class SocketCanDriver(Driver):
 
         recorder = ctx.recorder
         source_path, source_artifact_id = _resolve_capture(recorder, params)
-        dbc_path = Path(params.dbc).expanduser()
-        if not dbc_path.is_file():
-            raise InvalidRequest(
-                f"DBC file not found: {dbc_path}",
-                details={"dbc": str(dbc_path)},
-                preserved="the raw capture is untouched",
-            )
-
-        try:
-            database = await asyncio.to_thread(cantools.database.load_file, str(dbc_path))
-        except Exception as exc:  # noqa: BLE001 - cantools raises a family of parse errors that all mean one thing to the operator
-            raise InvalidRequest(
-                f"cannot read {dbc_path.name} as a CAN database: {exc}",
-                details={"dbc": str(dbc_path), "error": str(exc)},
-                preserved="the raw capture is untouched",
-            ) from exc
-        if not hasattr(database, "messages"):
-            raise InvalidRequest(
-                f"{dbc_path.name} is not a CAN database (a diagnostics database has no frames)",
-                details={"dbc": str(dbc_path)},
-                preserved="the raw capture is untouched",
-            )
+        database, dbc_path, dbc_hash = await asyncio.to_thread(_load_database, cantools, params.dbc)
 
         out_path = recorder.capture_path("can", f"{self.interface}-{params.label}", ".csv")
         summary = await asyncio.to_thread(
@@ -1307,7 +1286,7 @@ class SocketCanDriver(Driver):
             producer_version=getattr(cantools, "__version__", None),
             producer_config={
                 "dbc": dbc_path.name,
-                "dbc_sha256": sha256_file(dbc_path),
+                "dbc_sha256": dbc_hash,
                 "source_path": str(source_path),
                 "decode_choices": True,
                 "allow_truncated": True,
@@ -1344,6 +1323,38 @@ class SocketCanDriver(Driver):
 # ---------------------------------------------------------------------------
 # Decoding
 # ---------------------------------------------------------------------------
+
+
+def _load_database(cantools: Any, raw_path: str) -> tuple[Any, Path, str]:
+    """Load a CAN database and hash it, on a worker thread.
+
+    Everything here blocks: expanding ``~`` can hit NSS, parsing a large DBC
+    takes real time, and hashing it reads the whole file.  The hash is what
+    makes a decoded artifact reproducible — "decoded with vehicle.dbc" is
+    worthless if three revisions of that file exist.
+    """
+    dbc_path = Path(raw_path).expanduser()
+    if not dbc_path.is_file():
+        raise InvalidRequest(
+            f"DBC file not found: {dbc_path}",
+            details={"dbc": str(dbc_path)},
+            preserved="the raw capture is untouched",
+        )
+    try:
+        database = cantools.database.load_file(str(dbc_path))
+    except Exception as exc:
+        raise InvalidRequest(
+            f"cannot read {dbc_path.name} as a CAN database: {exc}",
+            details={"dbc": str(dbc_path), "error": str(exc)},
+            preserved="the raw capture is untouched",
+        ) from exc
+    if not hasattr(database, "messages"):
+        raise InvalidRequest(
+            f"{dbc_path.name} is not a CAN database (a diagnostics database has no frames)",
+            details={"dbc": str(dbc_path)},
+            preserved="the raw capture is untouched",
+        )
+    return database, dbc_path, sha256_file(dbc_path)
 
 
 def _resolve_capture(recorder: SessionRecorder, params: CanDecodeParams) -> tuple[Path, str | None]:

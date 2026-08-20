@@ -32,6 +32,7 @@ from fielddeck.common.timebase import Timestamp, monotonic_ns
 from fielddeck.drivers.base import ActionContext, DeviceParams, Driver, action
 from fielddeck.safety.limits import DerivedLimitCheck, LimitCheck
 from fielddeck.sim.base import SimulatedDeviceMixin
+from fielddeck.sim.scenario import Scenario
 
 __all__ = ["SimPsuDriver"]
 
@@ -67,7 +68,13 @@ class SimPsuDriver(SimulatedDeviceMixin, Driver):
 
     kind = TransportKind.VISA
 
-    def __init__(self, name: str = "sim-psu-0", *, fault_mode: bool = False) -> None:
+    def __init__(
+        self,
+        name: str = "sim-psu-0",
+        *,
+        fault_mode: bool = False,
+        scenario: Scenario | None = None,
+    ) -> None:
         descriptor = DeviceDescriptor(
             id=f"sim:visa:{name}",
             kind=TransportKind.VISA,
@@ -94,7 +101,10 @@ class SimPsuDriver(SimulatedDeviceMixin, Driver):
         self.voltage_setpoint = 0.0
         self.current_limit = 0.5
         self.output_enabled = False
-        self._fault_mode = fault_mode
+        # The scenario is shared with the CAN and serial sims so the fault
+        # they each report is one causal story on one time axis.
+        self._scenario = scenario or Scenario(armed=fault_mode)
+        self._fault_mode = self._scenario.armed
         self._output_since_ns: int | None = None
 
     # -- physics -----------------------------------------------------------
@@ -104,10 +114,8 @@ class SimPsuDriver(SimulatedDeviceMixin, Driver):
         if not self.output_enabled:
             return 0.0, 0.0, False
         ideal = self.voltage_setpoint / _LOAD_OHMS
-        if self._fault_mode and self._output_since_ns is not None:
-            elapsed = (monotonic_ns() - self._output_since_ns) / 1e9
-            if elapsed > _FAULT_AT_S:
-                ideal = _FAULT_CURRENT_A
+        if self._scenario.fault_developing:
+            ideal = _FAULT_CURRENT_A
         limited = ideal >= self.current_limit
         current = min(ideal, self.current_limit)
         # A real supply drops out of constant voltage when it hits the limit.
@@ -125,6 +133,7 @@ class SimPsuDriver(SimulatedDeviceMixin, Driver):
             "measured_a": current,
             "mode": "CC" if limited else ("CV" if self.output_enabled else "OFF"),
             "fault_mode": self._fault_mode,
+            "scenario": self._scenario.describe(),
         }
 
     async def safe_state(self) -> dict[str, Any]:
@@ -132,6 +141,7 @@ class SimPsuDriver(SimulatedDeviceMixin, Driver):
         was_on = self.output_enabled
         self.output_enabled = False
         self._output_since_ns = None
+        self._scenario.note_output(False)
         return {
             "device": self.device_id,
             "applied": True,
@@ -230,6 +240,7 @@ class SimPsuDriver(SimulatedDeviceMixin, Driver):
         """Enabling needs POWER and takes a lease; disabling is always allowed."""
         self.output_enabled = params.enabled
         self._output_since_ns = monotonic_ns() if params.enabled else None
+        self._scenario.note_output(params.enabled)
         voltage, current, _limited = self._measure()
         return {
             "output": self.output_enabled,

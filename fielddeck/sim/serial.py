@@ -28,6 +28,7 @@ from fielddeck.common.models import (
 from fielddeck.common.timebase import monotonic_ns
 from fielddeck.drivers.base import ActionContext, DeviceParams, Driver, action
 from fielddeck.sim.base import JitterClock, SimulatedDeviceMixin, seeded_random
+from fielddeck.sim.scenario import Scenario
 
 __all__ = ["SimSerialDriver"]
 
@@ -77,7 +78,13 @@ class SimSerialDriver(SimulatedDeviceMixin, Driver):
 
     kind = TransportKind.SERIAL
 
-    def __init__(self, name: str = "sim-uart-0", *, baudrate: int = 115200) -> None:
+    def __init__(
+        self,
+        name: str = "sim-uart-0",
+        *,
+        baudrate: int = 115200,
+        scenario: Scenario | None = None,
+    ) -> None:
         descriptor = DeviceDescriptor(
             id=f"sim:serial:{name}",
             kind=TransportKind.SERIAL,
@@ -112,6 +119,8 @@ class SimSerialDriver(SimulatedDeviceMixin, Driver):
         self._counter = 0
         self._tx_bytes = 0
         self._boot_emitted = False
+        self._scenario = scenario or Scenario()
+        self._error_emitted = False
 
     async def status(self) -> dict[str, Any]:
         return {
@@ -148,6 +157,11 @@ class SimSerialDriver(SimulatedDeviceMixin, Driver):
             for index, line in enumerate(_BOOT_LINES):
                 chunks.append((start_ns + index * 1_000_000, line))
         for stamp in self._clock.timestamps(start_ns, end_ns):
+            if not self._error_emitted and self._scenario.uart_error(stamp):
+                # The controller announces the fault on its console, which is
+                # what an engineer would actually see first.
+                self._error_emitted = True
+                chunks.append((stamp, b"[err] fault 0x17: bus off, output stage disabled\r\n"))
             self._counter = (self._counter + 1) & 0xFF
             # Roughly 1 frame in 40 is damaged, so CRC checking has a real
             # signal-to-noise ratio to report instead of a perfect score.

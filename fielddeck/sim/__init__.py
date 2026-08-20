@@ -14,9 +14,11 @@ from fielddeck.drivers.base import Driver
 from fielddeck.sim.can import SimCanDriver
 from fielddeck.sim.dmm import SimDmmDriver
 from fielddeck.sim.psu import SimPsuDriver
+from fielddeck.sim.scenario import Scenario, scenario_enabled
 from fielddeck.sim.serial import SimSerialDriver
 
 __all__ = [
+    "Scenario",
     "SimCanDriver",
     "SimDmmDriver",
     "SimPsuDriver",
@@ -32,10 +34,13 @@ def build_simulated_devices(*, fault_mode: bool = False) -> list[Driver]:
     enough to exercise discovery, capture, the timeline, arming, leases and
     ESTOP without any hardware attached.
     """
+    # One scenario object shared by every device, so the fault they each
+    # report is one causal story rather than three unrelated timers.
+    scenario = Scenario(armed=fault_mode or scenario_enabled())
     drivers: list[Driver] = [
-        SimCanDriver("can0"),
-        SimSerialDriver("sim-uart-0"),
-        SimPsuDriver("sim-psu-0", fault_mode=fault_mode),
+        SimCanDriver("can0", scenario=scenario),
+        SimSerialDriver("sim-uart-0", scenario=scenario),
+        SimPsuDriver("sim-psu-0", fault_mode=scenario.armed, scenario=scenario),
         SimDmmDriver("sim-dmm-0"),
     ]
     drivers.extend(_optional_simulated_devices())

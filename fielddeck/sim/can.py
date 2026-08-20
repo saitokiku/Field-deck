@@ -28,6 +28,7 @@ from fielddeck.common.models import (
 from fielddeck.common.timebase import Timestamp, monotonic_ns
 from fielddeck.drivers.base import ActionContext, DeviceParams, Driver, action
 from fielddeck.sim.base import JitterClock, SimulatedDeviceMixin, seeded_random
+from fielddeck.sim.scenario import Scenario
 
 __all__ = ["SimCanDriver"]
 
@@ -83,7 +84,8 @@ class SimCanDriver(SimulatedDeviceMixin, Driver):
         interface: str = "can0",
         *,
         bitrate: int = 500_000,
-        fault_after_s: float | None = 12.0,
+        fault_after_s: float | None = None,
+        scenario: Scenario | None = None,
     ) -> None:
         descriptor = DeviceDescriptor(
             id=f"sim:can:{interface}",
@@ -110,6 +112,7 @@ class SimCanDriver(SimulatedDeviceMixin, Driver):
         self.interface = interface
         self.bitrate = bitrate
         self._fault_after_s = fault_after_s
+        self._scenario = scenario or Scenario()
         self._rng = seeded_random(descriptor.id)
         self._clocks = {
             can_id: JitterClock(period, jitter, seeded_random(f"{descriptor.id}:{can_id:x}"))
@@ -131,11 +134,7 @@ class SimCanDriver(SimulatedDeviceMixin, Driver):
             "tx_frames": self._tx_count,
             "bus_errors": 0,
             "uptime_s": round(self.sim_elapsed_s, 3),
-            "fault_scenario": (
-                f"0x181 stops after {self._fault_after_s:g}s"
-                if self._fault_after_s is not None
-                else None
-            ),
+            "scenario": self._scenario.describe(),
         }
 
     async def safe_state(self) -> dict[str, Any]:
@@ -176,7 +175,14 @@ class SimCanDriver(SimulatedDeviceMixin, Driver):
         return frames
 
     def _faulted(self, stamp_ns: int, can_id: int) -> bool:
-        """The scripted failure: 0x181 goes quiet partway through the run."""
+        """The scripted failure: the controller stops transmitting 0x181.
+
+        Driven by the shared bench scenario rather than a timer of its own,
+        so the dropout lands a fixed 312 ms after the supply current climbs
+        and the two are genuinely correlated on the timeline.
+        """
+        if self._scenario.can_id_silent(can_id, stamp_ns):
+            return True
         if self._fault_after_s is None or can_id != 0x181:
             return False
         return (stamp_ns - self._sim_started_ns) / 1e9 > self._fault_after_s
