@@ -22,6 +22,8 @@ from fielddeck.common.errors import CaptureError, SessionError
 from fielddeck.common.models import PermissionLevel, StrictModel
 from fielddeck.drivers.base import ActionContext, ActionSpec, NoParams, action, collect_actions
 from fielddeck.protocols.isotp import reassemble
+from fielddeck.protocols.j1939 import decode_frame as j1939_decode_frame
+from fielddeck.protocols.j1939 import summarize as j1939_summarize
 from fielddeck.protocols.uds import decode_message, service_catalogue
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -173,6 +175,41 @@ class ProtocolActions:
                 f"{result['highest_permission_observed']}"
             ),
         }
+
+    @action(
+        "can.j1939",
+        permission=PermissionLevel.PASSIVE,
+        params=CaptureRefParams,
+        state_changing=False,
+        description="Decode a stored CAN capture as SAE J1939.",
+        allowed_during_estop=True,
+        timeout_s=120.0,
+    )
+    async def can_j1939(self, ctx: ActionContext, params: CaptureRefParams) -> dict[str, Any]:
+        """Splits 29-bit identifiers into PGN and source address.
+
+        Standardised parameter groups are named and scaled; proprietary ones
+        are reported as proprietary rather than guessed at, because the same
+        vendor PGN means different things on two different vehicles.
+        """
+        path = self._resolve(params)
+
+        def _work() -> dict[str, Any]:
+            frames = parse_candump(path.read_text(encoding="ascii", errors="replace"))
+            if params.can_ids is not None:
+                wanted = set(params.can_ids)
+                frames = [frame for frame in frames if frame["can_id"] in wanted]
+            summary = j1939_summarize(frames)
+            decoded = [j1939_decode_frame(frame["can_id"], frame["data"]) for frame in frames[:500]]
+            named = [entry for entry in decoded if entry["signals"]]
+            return {
+                **summary,
+                "frames_read": len(frames),
+                "decoded_preview": decoded[:50],
+                "frames_with_known_signals": len(named),
+            }
+
+        return {**await asyncio.to_thread(_work), "source": params.artifact_path}
 
     @action(
         "uds.services",
