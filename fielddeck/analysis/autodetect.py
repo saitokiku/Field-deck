@@ -524,7 +524,10 @@ def _one_delimiter(data: bytes, entry: dict[str, Any]) -> Hypothesis | None:
         f"agree {consistency * 100:.0f}% of the time" + (f" (modal gap {gap} bytes)" if gap else "")
     ]
     contradicting: list[str] = []
-    protocol = "delimiter-framed binary protocol"
+    # The byte is part of the name: two delimiter hypotheses for the same
+    # stream are a normal outcome, and "which one?" must be readable at a
+    # glance in a list of five lines on a 480x320 screen.
+    protocol = f"delimiter-framed binary protocol (0x{value:02X})"
     decoder = "delimiter"
 
     if value == 0x00:
