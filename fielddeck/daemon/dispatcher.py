@@ -253,6 +253,13 @@ class Dispatcher:
                 )
             )
 
+            # The lease is taken BEFORE the handler runs. Taking it afterwards
+            # leaves a window where the output is live but nothing is tracking
+            # it, and a client that dies inside that window would leave a rail
+            # energised with no dead-man handle.
+            lease_info = self._take_lease(
+                spec, effective, device_id, request, values, connection_id
+            )
             if spec.is_capture:
                 self.bus.publish(
                     new_event(
@@ -270,6 +277,10 @@ class Dispatcher:
                 payload = await self._run_handler(
                     spec, ctx, params, timeout, device_id, request, started
                 )
+            except BaseException:
+                # The action never happened, so the lease must not outlive it.
+                self._abandon_lease(lease_info, device_id, request)
+                raise
             finally:
                 if spec.is_capture:
                     # Emitted in a finally block: a capture that timed out or
@@ -287,11 +298,13 @@ class Dispatcher:
                         )
                     )
 
-        # 8. Leases.  Sustained outputs get a dead-man handle; turning an
-        #    output off surrenders it.
-        lease_info = self._settle_lease(spec, effective, device_id, request, values, connection_id)
+        # Turning an output off surrenders whatever was sustaining it. The
+        # acquire half already happened before the handler ran.
+        released = self._release_leases(spec, effective, device_id, request)
         if lease_info:
             payload = {**payload, **lease_info}
+        elif released:
+            payload = {**payload, **released}
 
         duration = monotonic_ns() - started.monotonic_ns
         self.bus.publish(
@@ -350,6 +363,9 @@ class Dispatcher:
         if driver is None or not spec.state_changing:
             yield
             return
+        # asyncio.Lock.acquire() returns without suspending when the lock is
+        # free, so no other task can slip between this check and the acquire
+        # below. Restructuring either half needs that property re-checked.
         if driver.lock.locked():
             raise DeviceBusy(
                 f"{driver.device_id} is busy with {driver.busy_with or 'another operation'}",
@@ -407,7 +423,7 @@ class Dispatcher:
             self._running.pop(key, None)
         return _as_dict(raw)
 
-    def _settle_lease(
+    def _take_lease(
         self,
         spec: ActionSpec,
         effective: PermissionLevel,
@@ -416,43 +432,15 @@ class Dispatcher:
         values: dict[str, Any],
         connection_id: int | None,
     ) -> dict[str, Any]:
+        """Acquire the dead-man handle for a sustained output."""
         if not spec.requires_lease or device_id is None:
             return {}
-        session_id = self.sessions.current_id
-
         if effective is PermissionLevel.PASSIVE:
-            # The safe direction: whatever this action was sustaining is over.
-            released = [
-                lease
-                for lease in self.safety.leases.for_device(device_id)
-                if lease.action == spec.name
-            ]
-            for lease in released:
-                self.safety.leases.release(lease.lease_id)
-                self.bus.publish(
-                    new_event(
-                        EventType.LEASE_RELEASED,
-                        source=request.source,
-                        session_id=session_id,
-                        device_id=device_id,
-                        action=spec.name,
-                        message=f"output lease {lease.lease_id} released",
-                        payload={"lease_id": lease.lease_id},
-                    )
-                )
-            if released:
-                self.bus.publish(
-                    new_event(
-                        EventType.OUTPUT_DISABLED,
-                        source=request.source,
-                        session_id=session_id,
-                        device_id=device_id,
-                        action=spec.name,
-                        message=f"{device_id} output disabled",
-                    )
-                )
-            return {"lease": None}
+            # The safe direction: this call ends an output rather than
+            # starting one, so it takes no lease.
+            return {}
 
+        session_id = self.sessions.current_id
         ttl = values.get("lease_ttl_s") or self.safety.config.default_lease_ttl_s
         lease = self.safety.leases.acquire(
             device_id=device_id,
@@ -499,6 +487,72 @@ class Dispatcher:
                 "renew_with": "safety.lease_renew",
             }
         }
+
+    def _abandon_lease(
+        self, lease_info: dict[str, Any], device_id: str | None, request: ActionRequest
+    ) -> None:
+        """Give back a lease whose action failed, timed out or was cancelled."""
+        lease = lease_info.get("lease") if lease_info else None
+        if not lease:
+            return
+        self.safety.leases.release(str(lease["lease_id"]))
+        self.bus.publish(
+            new_event(
+                EventType.LEASE_RELEASED,
+                source=request.source,
+                severity=EventSeverity.WARNING,
+                session_id=self.sessions.current_id,
+                device_id=device_id,
+                message=(
+                    f"lease {lease['lease_id']} released because the action did not "
+                    "complete; safe state will be applied"
+                ),
+                payload={"lease_id": lease["lease_id"]},
+            )
+        )
+
+    def _release_leases(
+        self,
+        spec: ActionSpec,
+        effective: PermissionLevel,
+        device_id: str | None,
+        request: ActionRequest,
+    ) -> dict[str, Any]:
+        """Surrender the leases an output-off action just made unnecessary."""
+        if not spec.requires_lease or device_id is None:
+            return {}
+        if effective is not PermissionLevel.PASSIVE:
+            return {}
+
+        session_id = self.sessions.current_id
+        released = [
+            lease for lease in self.safety.leases.for_device(device_id) if lease.action == spec.name
+        ]
+        for lease in released:
+            self.safety.leases.release(lease.lease_id)
+            self.bus.publish(
+                new_event(
+                    EventType.LEASE_RELEASED,
+                    source=request.source,
+                    session_id=session_id,
+                    device_id=device_id,
+                    action=spec.name,
+                    message=f"output lease {lease.lease_id} released",
+                    payload={"lease_id": lease.lease_id},
+                )
+            )
+        if released:
+            self.bus.publish(
+                new_event(
+                    EventType.OUTPUT_DISABLED,
+                    source=request.source,
+                    session_id=session_id,
+                    device_id=device_id,
+                    action=spec.name,
+                    message=f"{device_id} output disabled",
+                )
+            )
+        return {"lease": None}
 
     def _emit_failure(
         self,

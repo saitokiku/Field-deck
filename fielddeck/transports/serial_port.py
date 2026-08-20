@@ -698,9 +698,11 @@ class SerialDriver(Driver):
         """Changes this end of the link only — no bytes reach the DUT.
 
         A closed port is only reconfigured on paper: opening one to apply a baud
-        rate would move DTR/RTS on a DUT nobody asked us to touch.
+        rate would move DTR/RTS on a DUT nobody asked us to touch.  An open port
+        is reconfigured atomically-or-not-at-all — a half-applied framing (new
+        baud, old parity) is a port that lies about what it is receiving.
         """
-        self._settings = _PortSettings(
+        desired = _PortSettings(
             baudrate=params.baudrate,
             bytesize=params.bytesize,
             parity=params.parity,
@@ -708,40 +710,61 @@ class SerialDriver(Driver):
             rtscts=params.rtscts,
             xonxoff=params.xonxoff,
         )
+        if self._port is not None:
+            await self._apply_live(desired)
+        self._settings = desired
         if params.electrical is not None:
             # Operator-supplied knowledge, the only source there is.
             self._descriptor.metadata["electrical"] = params.electrical
-        self._descriptor.metadata["baudrate"] = self._settings.baudrate
-        self._descriptor.metadata["framing"] = self._settings.framing
-        self._descriptor.metadata["flow_control"] = self._settings.flow_control
-
-        if self._port is not None:
-            # Stop the reader first: reconfiguring termios under a thread that
-            # is blocked in read() is a race nobody should have to debug.  Bytes
-            # in flight across a framing change are lost either way.
-            await self._stop_reader()
-            port = self._port
-            try:
-                port.baudrate = self._settings.baudrate
-                port.bytesize = self._settings.bytesize
-                port.parity = self._settings.parity
-                port.stopbits = self._settings.stopbits
-                port.rtscts = self._settings.rtscts
-                port.xonxoff = self._settings.xonxoff
-            # The adapter rejected a setting; that is a transport error, not a crash.
-            except Exception as exc:
-                raise TransportError(
-                    f"{self.path} rejected {self._settings.baudrate} "
-                    f"{self._settings.framing}: {exc}",
-                    details={"device_id": self.device_id, "path": self.path},
-                    preserved="the port is still open; no bytes were sent",
-                ) from exc
-            finally:
-                self._stop = asyncio.Event()
-                self._reader = asyncio.create_task(
-                    self._reader_loop(port), name=f"serial-reader:{self.device_id}"
-                )
+        self._descriptor.metadata["baudrate"] = desired.baudrate
+        self._descriptor.metadata["framing"] = desired.framing
+        self._descriptor.metadata["flow_control"] = desired.flow_control
         return await self.status()
+
+    async def _apply_live(self, desired: _PortSettings) -> None:
+        """Reconfigure an open port, rolling back if the adapter refuses.
+
+        The reader is stopped first: driving tcsetattr under a thread that is
+        blocked in read() is a race nobody should have to debug at 2am.  Bytes
+        in flight across a framing change are lost either way — the old framing
+        no longer describes them.
+        """
+        await self._stop_reader()
+        port = self._port
+        previous = port.get_settings()
+        wanted = {
+            "baudrate": desired.baudrate,
+            "bytesize": desired.bytesize,
+            "parity": desired.parity,
+            "stopbits": desired.stopbits,
+            "rtscts": desired.rtscts,
+            "xonxoff": desired.xonxoff,
+        }
+        try:
+            # apply_settings touches only what actually changes, so an adapter
+            # is never asked to re-accept a setting it is already using.
+            port.apply_settings(wanted)
+        # Drivers reject combinations they cannot do (7 data bits, exotic
+        # baud rates).  Put the port back the way we found it and say so.
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                port.apply_settings(previous)
+            raise TransportError(
+                f"{self.path} rejected {desired.baudrate} {desired.framing} "
+                f"(flow control {desired.flow_control}): {exc}",
+                details={
+                    "device_id": self.device_id,
+                    "path": self.path,
+                    "requested": wanted,
+                    "restored": {key: previous[key] for key in wanted},
+                },
+                preserved="the port is still open at its previous settings; no bytes were sent",
+            ) from exc
+        finally:
+            self._stop = asyncio.Event()
+            self._reader = asyncio.create_task(
+                self._reader_loop(port), name=f"serial-reader:{self.device_id}"
+            )
 
     @action(
         "serial.monitor",
@@ -764,6 +787,9 @@ class SerialDriver(Driver):
         try:
             stats = await self._receive(ctx, params, sink)
         except DeviceDisconnected as exc:
+            if exc.preserved is not None:
+                # The port never opened; that error already states what survived.
+                raise
             received = sum(int(chunk["len"]) for chunk in chunks)
             raise DeviceDisconnected(
                 exc.message,
@@ -805,6 +831,9 @@ class SerialDriver(Driver):
             monitor = await self.serial_monitor(ctx, params)
             return {**monitor, "artifact": None, "warning": "no active session; bytes not saved"}
 
+        # Open before creating any files: a port that refuses to open should
+        # not leave an empty artifact behind in the session.
+        opened = await self._ensure_open()
         recorder = ctx.recorder
         raw_path = recorder.capture_path("serial", params.label, ".bin")
         index_path = raw_path.with_suffix(".idx.jsonl")
@@ -831,6 +860,7 @@ class SerialDriver(Driver):
                 # The dispatcher cancels cancelable actions.  Fall through so
                 # the files close and the artifact is registered, then re-raise.
                 failure = exc
+        stats["opened_port"] = bool(stats.get("opened_port")) or opened
 
         # Files are closed here, so sizes and hashes describe complete files.
         artifact = recorder.add_artifact(

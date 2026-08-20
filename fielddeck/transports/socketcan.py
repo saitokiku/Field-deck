@@ -8,20 +8,21 @@ acknowledge.  Two rules therefore shape this module:
 **Nothing transmits unless an authorized CONTROL action says so.**  The driver
 holds a TX lock that starts closed, opens only inside ``can.send``, and is
 closed again by :meth:`SocketCanDriver.safe_state`.  Receive paths open a
-socket that is never handed a frame to send, and the TX socket is opened for
-the duration of one send and closed immediately afterwards.
+socket that is never handed a frame to send, and the TX socket exists only for
+the duration of one send.
 
 **The link is never reconfigured behind the operator's back.**  Bitrate and
 listen-only ctrlmode live on the netdev, and changing either requires taking
-the interface down — which on a live machine means an outage the operator did
-not ask for.  FieldDeck reads those settings (sysfs and ``ip -details``) and
-reports them; it never writes them.  There is deliberately no ``can.configure``
-and no bitrate autodetection: every autodetect scheme in the wild either
-reconfigures the link or transmits to provoke an ACK, and transmitting into a
-vehicle bus at the wrong bitrate is exactly how a diagnostic tool becomes an
-incident.  What this driver does instead is passive evidence — see the
-``bitrate_evidence`` block in ``can.stats``: error frames with no valid traffic
-mean the configured bitrate is wrong, and that conclusion costs nothing.
+the interface down — which on a live machine means an outage nobody asked for.
+FieldDeck reads those settings (sysfs, and ``ip -details`` for what sysfs does
+not expose) and reports them; it never writes them.  There is deliberately no
+``can.configure`` and no bitrate autodetection: every autodetect scheme in the
+wild either cycles the link through candidate bitrates or transmits to provoke
+an ACK, and transmitting into a vehicle bus at the wrong bitrate is how a
+diagnostic tool becomes an incident.  What this driver offers instead is
+passive evidence — the ``bitrate_evidence`` block in ``can.stats``: error
+frames with no valid traffic mean the configured bitrate is wrong, and that
+conclusion costs nothing.
 
 Risky edges worth knowing at 2am:
 
@@ -31,11 +32,11 @@ Risky edges worth knowing at 2am:
   runs out of memory.
 * Frame timestamps come from the kernel on ``CLOCK_REALTIME``.  They are
   projected onto FieldDeck's monotonic axis through an anchor taken when the
-  capture opened; an NTP step mid-capture skews the projection, so the raw
-  kernel value is kept in every frame record as ``utc_ns``.
+  capture opened; a wall-clock step mid-capture skews that projection, so the
+  raw kernel value travels with every frame as ``utc_ns``.
 * Raw capture files are candump text and are never rewritten.  ``can.decode``
-  reads one and writes a *separate* derived CSV that names its source, the
-  DBC, and the cantools version that produced it.
+  reads one and writes a *separate* CSV that names its source capture, the DBC
+  it used (by hash) and the cantools version that produced it.
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, field_validator, model_validator
 
@@ -58,6 +59,7 @@ from fielddeck.common.config import FieldDeckConfig
 from fielddeck.common.errors import (
     CaptureError,
     DeviceDisconnected,
+    FieldDeckError,
     InvalidRequest,
     TransportError,
     UnsupportedCapability,
@@ -66,6 +68,7 @@ from fielddeck.common.events import EventSeverity, EventType, new_event
 from fielddeck.common.ids import device_id as compose_device_id
 from fielddeck.common.logging import get_logger
 from fielddeck.common.models import (
+    CaptureArtifact,
     ConnectionState,
     DeviceCapability,
     DeviceDescriptor,
@@ -77,6 +80,9 @@ from fielddeck.common.process import have_tool, run_tool
 from fielddeck.common.timebase import TimeAnchor, Timestamp, monotonic_ns
 from fielddeck.discovery.linux import list_can_interfaces
 from fielddeck.drivers.base import ActionContext, DeviceParams, Driver, action
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from fielddeck.capture.recorder import SessionRecorder
 
 __all__ = ["SocketCanDriver", "discover_can_drivers"]
 
@@ -94,12 +100,11 @@ _RECV_POLL_S = 0.05
 _DRAIN_INTERVAL_S = 0.05
 
 #: Ceiling on frames buffered between the reader thread and the drain loop.
-#: Bounded on purpose: a 1 Mbit/s bus saturated with 0-byte frames is ~15k
-#: frames/s, and an unbounded queue would simply defer the failure until the
-#: Pi is out of memory.
+#: Bounded on purpose: a saturated 1 Mbit/s bus is ~15k frames/s and an
+#: unbounded queue would only defer the failure until the Pi is out of memory.
 _MAX_QUEUE_FRAMES = 65_536
 
-#: Frames echoed into the action result; the capture file holds all of them.
+#: Frames echoed back in a capture result; the capture file holds all of them.
 _RESULT_SAMPLE_FRAMES = 50
 
 #: A timestamp below this (2001-09-09) is not a wall clock, so it came from a
@@ -110,23 +115,28 @@ _CANDUMP_MEDIA_TYPE = "text/vnd.candump"
 
 #: ``CAN_ERR_FLAG`` from <linux/can.h>.  python-can strips it off
 #: ``arbitration_id``; candump keeps it in the printed id, so it is restored
-#: when writing a log that can-utils and Wireshark must be able to read back.
+#: when writing a log that can-utils and Wireshark have to read back.
 _CAN_ERR_FLAG = 0x20000000
+
+#: ``IFF_UP``/``IFF_RUNNING`` from <linux/if.h>.  ``operstate`` is not usable
+#: as the up/down answer for CAN: vcan reports "unknown" while working fine.
+_IFF_UP = 0x1
+_IFF_RUNNING = 0x40
 
 
 # ---------------------------------------------------------------------------
-# Optional dependency
+# Optional dependencies
 # ---------------------------------------------------------------------------
 
 
 def _load_can() -> Any | None:
     """python-can if this install has it, else None.
 
-    Imported lazily so the daemon starts on a machine with no CAN extra: a
-    missing library degrades one transport, never the console.
+    Imported lazily so the daemon starts on a machine without the CAN extra:
+    a missing library degrades one transport, never the console.
     """
     try:
-        import can  # noqa: PLC0415 - optional hardware dependency, imported on demand
+        import can
     except ImportError:
         return None
     return can
@@ -145,10 +155,15 @@ def _require_can() -> Any:
 
 def _load_cantools() -> Any | None:
     try:
-        import cantools  # noqa: PLC0415 - optional analysis dependency
+        import cantools
     except ImportError:
         return None
     return cantools
+
+
+def _can_version() -> str | None:
+    module = _load_can()
+    return getattr(module, "__version__", None) if module is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -158,29 +173,30 @@ def _load_cantools() -> Any | None:
 
 def _read_sysfs(*parts: str) -> str | None:
     try:
-        return (_SYS_NET.joinpath(*parts)).read_text(encoding="utf-8", errors="replace").strip()
+        return _SYS_NET.joinpath(*parts).read_text(encoding="utf-8", errors="replace").strip()
     except OSError:
         return None
 
 
-def _read_int(*parts: str) -> int | None:
+def _read_int(*parts: str, base: int = 10) -> int | None:
     raw = _read_sysfs(*parts)
     if raw is None:
         return None
     try:
-        return int(raw)
+        return int(raw, base)
     except ValueError:
         return None
 
 
 def _link_facts(interface: str) -> dict[str, Any]:
-    """Everything sysfs will tell us about the interface, reading only.
+    """Everything sysfs will say about the interface, reading only.
 
-    sysfs has no CAN controller state or ctrlmode; those come from netlink via
-    :meth:`SocketCanDriver._link_details`.  What is here is always available
-    and never blocks.
+    sysfs exposes no CAN controller state and no ctrlmode; those come from
+    netlink via :meth:`SocketCanDriver._link_details`.  What is here is always
+    available, never blocks, and never touches the bus.
     """
-    operstate = _read_sysfs(interface, "operstate") or "unknown"
+    present = _SYS_NET.joinpath(interface).exists()
+    flags = _read_int(interface, "flags", base=16) or 0
     counters = {
         name: _read_int(interface, "statistics", name)
         for name in (
@@ -196,12 +212,10 @@ def _link_facts(interface: str) -> dict[str, Any]:
     }
     mtu = _read_int(interface, "mtu") or 0
     return {
-        "present": _SYS_NET.joinpath(interface).exists(),
-        "operstate": operstate,
-        # A CAN link that has never been brought up reports "down"; "unknown"
-        # is what vcan reports while perfectly usable, so both are accepted
-        # and the caller is told which one it got.
-        "up": operstate in {"up", "unknown"} and _SYS_NET.joinpath(interface).exists(),
+        "present": present,
+        "operstate": _read_sysfs(interface, "operstate") or "unknown",
+        "up": present and bool(flags & _IFF_UP),
+        "running": bool(flags & _IFF_RUNNING),
         "bitrate": _read_int(interface, "can_bittiming", "bitrate"),
         "sample_point": _read_int(interface, "can_bittiming", "sample_point"),
         "mtu": mtu,
@@ -220,12 +234,61 @@ def _interface_backing(interface: str) -> tuple[str | None, bool]:
     """
     try:
         target = _SYS_NET.joinpath(interface, "device").resolve()
-    except OSError:
+    except OSError:  # pragma: no cover - racing a hot-unplug
         return None, False
     if not target.exists():
         return None, False
     text = str(target)
     return text, "/usb" in text
+
+
+def _controller_summary(details: dict[str, Any] | None) -> dict[str, Any]:
+    """Pull the CAN controller facts out of ``ip -details -json`` output."""
+    if not details:
+        return {"source": None, "listen_only": None, "state": None}
+    info = details.get("linkinfo") or {}
+    data = info.get("info_data") or {}
+    ctrlmode = [str(flag).lower() for flag in (data.get("ctrlmode") or [])]
+    bittiming = data.get("bittiming") or {}
+    return {
+        "source": "ip -details link",
+        "kind": info.get("info_kind"),
+        # None, not False, when there is nothing to read: "unknown" and "not
+        # listen-only" are very different claims to make about a live bus.
+        "listen_only": ("listen-only" in ctrlmode) if data else None,
+        "ctrlmode": ctrlmode,
+        "state": data.get("state"),
+        "bitrate": bittiming.get("bitrate"),
+        "sample_point": bittiming.get("sample_point"),
+        "berr_counter": data.get("berr_counter"),
+        "restart_ms": data.get("restart_ms"),
+    }
+
+
+def _bitrate_evidence(
+    *, bitrate: int | None, valid_frames: int, error_frames: int
+) -> dict[str, Any]:
+    """What observed traffic says about the configured bitrate.
+
+    This is the whole of FieldDeck's bitrate story, on purpose.  Autodetection
+    by transmitting to provoke an ACK, or by cycling the link through candidate
+    bitrates, disturbs a bus that may be driving something.  Watching is free.
+    """
+    if valid_frames == 0 and error_frames > 0:
+        verdict = "likely wrong: only error frames were seen"
+    elif valid_frames == 0:
+        verdict = "no evidence: the bus was silent"
+    elif error_frames > valid_frames:
+        verdict = "suspect: error frames outnumber valid frames"
+    else:
+        verdict = "consistent: valid frames were received"
+    return {
+        "configured_bitrate": bitrate,
+        "valid_frames": valid_frames,
+        "error_frames": error_frames,
+        "verdict": verdict,
+        "method": "passive observation only; FieldDeck never transmits to detect a bitrate",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -243,12 +306,12 @@ class _RxClock:
         """Return ``(monotonic_ns, utc_ns)`` for one received frame."""
         if timestamp >= _EPOCH_SANITY_S:
             utc = int(timestamp * 1e9)
-            # The offset is fixed at capture start.  A wall-clock step during
-            # the capture skews this projection, which is why the raw kernel
-            # value travels with the frame instead of being thrown away.
+            # The offset is fixed when the capture opens.  A wall-clock step
+            # during the capture skews this projection, which is exactly why
+            # the raw kernel value is kept rather than thrown away.
             return self.anchor.monotonic_ns + (utc - self.anchor.utc_ns), utc
-        # Backends without kernel timestamping hand back 0 or a relative
-        # figure.  Arrival time is then the only honest answer available.
+        # Backends without kernel timestamping hand back 0 or something
+        # relative.  Arrival time is then the only honest answer available.
         mono = monotonic_ns()
         return mono, self.anchor.utc_for(mono)
 
@@ -257,9 +320,9 @@ class _RxPump:
     """Bridges python-can's blocking ``recv()`` into asyncio.
 
     The reader thread owns the socket read; the event loop only ever drains a
-    bounded queue.  When the bus outruns the drain loop the *newest* frames
-    are dropped and counted — losing the tail of an overflow is recoverable,
-    losing the beginning of the fault that caused it is not.
+    bounded queue.  When the bus outruns the drain loop the *newest* frames are
+    dropped and counted — losing the tail of an overflow is recoverable, losing
+    the beginning of the fault that caused it is not.
     """
 
     def __init__(self, bus: Any, *, capacity: int, name: str) -> None:
@@ -267,7 +330,7 @@ class _RxPump:
         self._queue: queue.Queue[Any] = queue.Queue(maxsize=capacity)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name=name, daemon=True)
-        #: Written only by the reader thread, read only by the loop thread.
+        #: Incremented only by the reader thread, read only by the loop thread.
         self.dropped = 0
         self.error: BaseException | None = None
 
@@ -278,7 +341,7 @@ class _RxPump:
         while not self._stop.is_set():
             try:
                 message = self._bus.recv(timeout=_RECV_POLL_S)
-            except Exception as exc:  # noqa: BLE001 - the reader records the fault and exits; the loop reports it
+            except Exception as exc:  # noqa: BLE001 - the reader records the fault and exits; the action reports it
                 self.error = exc
                 return
             if message is None:
@@ -298,11 +361,11 @@ class _RxPump:
                 return out
 
     def stop(self) -> None:
-        """Stop the reader and wait for it to leave the socket alone.
+        """Stop the reader and wait for it to let go of the socket.
 
         Deliberately synchronous, including on the cancellation path: the
-        socket is closed right after this returns, and a reader thread still
-        selecting on a closed descriptor is a far worse problem than one
+        socket is closed immediately after this returns, and a reader thread
+        still selecting on a closed descriptor is a far worse problem than one
         drain interval of event-loop latency.
         """
         self._stop.set()
@@ -312,8 +375,8 @@ class _RxPump:
 def _kernel_filters(id_filter: Sequence[int] | None) -> list[dict[str, int]] | None:
     """Translate an id filter into SocketCAN kernel filters.
 
-    Filtering in the kernel keeps frames the operator did not ask for out of
-    userspace entirely.  It is an RX-side socket option and transmits nothing.
+    Filtering in the kernel keeps unwanted frames out of userspace entirely.
+    It is an RX-side socket option and transmits nothing.
     """
     if not id_filter:
         return None
@@ -323,12 +386,38 @@ def _kernel_filters(id_filter: Sequence[int] | None) -> list[dict[str, int]] | N
     ]
 
 
+def _frame_dict(message: Any, clock: _RxClock) -> dict[str, Any]:
+    """One received frame, in FieldDeck terms."""
+    monotonic, utc = clock.project(float(message.timestamp or 0.0))
+    data = bytes(message.data or b"")
+    return {
+        "monotonic_ns": monotonic,
+        "utc_ns": utc,
+        "can_id": int(message.arbitration_id),
+        "extended": bool(message.is_extended_id),
+        "dlc": int(message.dlc or len(data)),
+        "data": data.hex(),
+        "error": bool(message.is_error_frame),
+        "remote": bool(message.is_remote_frame),
+        "fd": bool(getattr(message, "is_fd", False)),
+        "brs": bool(getattr(message, "bitrate_switch", False)),
+        "esi": bool(getattr(message, "error_state_indicator", False)),
+        # False for frames this machine put on the bus (kernel loopback), so a
+        # capture can distinguish what was heard from what FieldDeck said.
+        # Everything on a vcan interface is locally generated.
+        "rx": bool(getattr(message, "is_rx", True)),
+        # Present so a real capture has the same shape as the simulated one.
+        # A description needs a DBC, which is what can.decode is for.
+        "description": None,
+    }
+
+
 def _frame_bits(frame: dict[str, Any]) -> int:
     """Nominal on-the-wire bits for one classic CAN frame, stuffing excluded.
 
-    47 bits of overhead for a standard frame, 67 for extended, including the
-    3-bit inter-frame space.  Bit stuffing adds up to a further ~20%, so a bus
-    load computed from this is a floor, and it is reported as such.
+    47 bits of overhead for a standard frame, 67 for extended, both including
+    the 3-bit inter-frame space.  Bit stuffing adds up to ~20% more, so a bus
+    load computed from this is a floor and is reported as one.
     """
     overhead = 67 if frame.get("extended") else 47
     return overhead + 8 * (len(frame.get("data") or "") // 2)
@@ -360,8 +449,8 @@ def _candump_line(interface: str, utc_ns: int, frame: dict[str, Any]) -> str:
     """Render one frame the way ``candump -l`` would.
 
     The format is load-bearing: can-utils' ``canplayer`` and Wireshark both
-    read it, so a FieldDeck capture is usable by tools that have never heard
-    of FieldDeck.
+    read it, so a FieldDeck capture stays useful to tools that have never
+    heard of FieldDeck.
     """
     can_id = int(frame["can_id"])
     if frame.get("error"):
@@ -387,10 +476,10 @@ def _parse_candump_line(line: str) -> _LoggedFrame | None:
     if match is None:
         return None
     raw_id = int(match["can_id"], 16)
-    # candump prints 3 hex digits for 11-bit ids and 8 for everything else,
-    # which is the only reliable extended/standard signal the text carries.
-    extended = len(match["can_id"]) > 3 and not bool(raw_id & _CAN_ERR_FLAG)
     error = bool(raw_id & _CAN_ERR_FLAG)
+    # candump prints 3 hex digits for 11-bit ids and 8 for everything else,
+    # which is the only extended/standard signal the text format carries.
+    extended = len(match["can_id"]) > 3 and not error
     rest = match["rest"]
     fd = match["sep"] == "##"
     remote = rest[:1] in {"R", "r"}
@@ -398,9 +487,8 @@ def _parse_candump_line(line: str) -> _LoggedFrame | None:
     if remote:
         data = b""
     else:
-        payload = rest[1:] if fd else rest
         try:
-            data = bytes.fromhex(payload)
+            data = bytes.fromhex(rest[1:] if fd else rest)
         except ValueError:
             return None
 
@@ -433,7 +521,7 @@ class CanListenParams(DeviceParams):
             return None
         for can_id in value:
             if not 0 <= can_id <= 0x1FFFFFFF:
-                raise ValueError(f"0x{can_id:X} is not a CAN arbitration id")
+                raise ValueError(f"{can_id} is not a CAN arbitration id")
         return value
 
 
@@ -469,12 +557,14 @@ class CanDecodeParams(DeviceParams):
     artifact_id: str | None = Field(
         default=None, description="Capture artifact in the current session"
     )
-    path: str | None = Field(default=None, description="Capture file inside the sessions directory")
+    path: str | None = Field(
+        default=None, description="Capture file, relative to the session directory"
+    )
     label: str = Field(default="decoded", max_length=64)
     max_frames: int = Field(default=500_000, ge=1, le=20_000_000)
 
     @model_validator(mode="after")
-    def _one_source(self) -> CanDecodeParams:
+    def _exactly_one_source(self) -> CanDecodeParams:
         if bool(self.artifact_id) == bool(self.path):
             raise ValueError("give exactly one of artifact_id or path")
         return self
@@ -488,10 +578,10 @@ class CanDecodeParams(DeviceParams):
 class SocketCanDriver(Driver):
     """One SocketCAN interface, driven through python-can.
 
-    The driver never owns a long-lived socket.  Each receive action opens its
-    own RAW socket (SocketCAN copies every frame to every bound socket, so
-    concurrent captures do not steal frames from each other) and each send
-    opens a socket for exactly as long as the transmission takes.
+    The driver holds no long-lived socket.  Each receive action opens its own
+    RAW socket — SocketCAN copies every frame to every bound socket, so
+    concurrent captures never steal frames from each other — and each send
+    opens one for exactly as long as the transmission takes.
     """
 
     kind = TransportKind.CAN
@@ -502,19 +592,19 @@ class SocketCanDriver(Driver):
         *,
         bitrate: int | None = None,
         fd_capable: bool = False,
-        up: bool = False,
         virtual: bool = False,
         mtu: int = 16,
         ip_tool: str = "ip",
         bus_interface: str = "socketcan",
     ) -> None:
         backing, usb_backed = _interface_backing(interface)
+        facts = _link_facts(interface)
+        up = facts["up"]
         descriptor = DeviceDescriptor(
             id=compose_device_id("can", "socketcan", interface),
             kind=TransportKind.CAN,
             display_name=f"CAN {interface}" + (f" @ {bitrate // 1000}k" if bitrate else ""),
             path=f"/sys/class/net/{interface}",
-            vendor=None,
             product="SocketCAN",
             roles=[DeviceRole.BUS],
             capabilities=[
@@ -526,7 +616,7 @@ class SocketCanDriver(Driver):
             ],
             state=ConnectionState.READY if up else ConnectionState.DISCOVERED,
             # A USB CAN adapter's interface name is assigned in plug order, so
-            # can0 is not proof it is the same adapter as yesterday.
+            # can0 is not evidence that this is yesterday's adapter.
             stable_id=not usb_backed,
             simulated=False,
             warning=(
@@ -539,22 +629,22 @@ class SocketCanDriver(Driver):
             ),
             metadata={
                 "interface": interface,
-                "bitrate": bitrate,
-                "fd_capable": fd_capable,
-                "mtu": mtu,
+                "bitrate": bitrate or facts["bitrate"],
+                "fd_capable": fd_capable or facts["fd_capable"],
+                "mtu": mtu or facts["mtu"],
                 "virtual": virtual,
                 "sysfs_device": backing,
                 "usb_backed": usb_backed,
-                # The software TX lock, not the controller ctrlmode; can.status
-                # reports the controller separately because only one of the two
-                # is something FieldDeck controls.
+                # The software TX lock, not the controller ctrlmode.  can.status
+                # reports the controller separately, because only one of the two
+                # is something FieldDeck is entitled to change.
                 "mode": "listen-only",
             },
         )
         super().__init__(descriptor)
         self.interface = interface
-        self.bitrate = bitrate
-        self.fd_capable = fd_capable
+        self.bitrate = bitrate or facts["bitrate"]
+        self.fd_capable = fd_capable or facts["fd_capable"]
         self.virtual = virtual
         self._ip_tool = ip_tool
         #: Which python-can backend to open.  Only SocketCAN is used in
@@ -577,18 +667,19 @@ class SocketCanDriver(Driver):
 
     async def status(self) -> dict[str, Any]:
         facts = _link_facts(self.interface)
-        details = await self._link_details()
-        controller = _controller_summary(details)
+        controller = _controller_summary(await self._link_details())
         if not facts["present"]:
             self._set_state(ConnectionState.ABSENT)
-        elif self._descriptor.state is ConnectionState.ABSENT and facts["up"]:
+        elif facts["up"] and self._descriptor.state in (
+            ConnectionState.ABSENT,
+            ConnectionState.DISCOVERED,
+        ):
             self._set_state(ConnectionState.READY)
 
-        bitrate = facts["bitrate"] or controller.get("bitrate") or self.bitrate
-        self.bitrate = bitrate
+        self.bitrate = facts["bitrate"] or controller.get("bitrate") or self.bitrate
         return {
             "interface": self.interface,
-            "bitrate": bitrate,
+            "bitrate": self.bitrate,
             "mode": "normal" if self._tx_unlocked else "listen-only",
             "state": str(self._descriptor.state),
             "link_up": facts["up"],
@@ -600,7 +691,7 @@ class SocketCanDriver(Driver):
             "fd_capable": facts["fd_capable"],
             "virtual": self.virtual,
             # None means "the controller mode could not be read", which is not
-            # the same as "the controller is not listen-only".
+            # the same claim as "the controller is not in listen-only".
             "controller_listen_only": controller.get("listen_only"),
             "controller_state": controller.get("state"),
             "berr_counter": controller.get("berr_counter"),
@@ -631,9 +722,9 @@ class SocketCanDriver(Driver):
         """Controller state and ctrlmode, which sysfs does not expose.
 
         ``ip -details -json link show`` reads netlink and changes nothing.  A
-        missing or too-old iproute2 simply means the controller fields are
-        reported as unknown; it is never a reason to fail an action.  Results
-        are cached for a second because the HMI polls status continuously.
+        missing or too-old iproute2 just means the controller fields read as
+        unknown; it is never a reason to fail an action.  Cached briefly
+        because the HMI polls status continuously.
         """
         now = monotonic_ns()
         if self._details_cache is not None and now - self._details_cache[0] < 1_000_000_000:
@@ -666,7 +757,7 @@ class SocketCanDriver(Driver):
     def _open_bus(self, *, id_filter: Sequence[int] | None = None) -> Any:
         """Open a socket on the interface.  Opening puts nothing on the wire.
 
-        Called from a worker thread: binding an ``AF_CAN`` socket is quick but
+        Called from a worker thread: binding an ``AF_CAN`` socket is quick, but
         it is still a syscall that can block on a wedged driver.
         """
         can_module = _require_can()
@@ -678,24 +769,25 @@ class SocketCanDriver(Driver):
                 fd=self.fd_capable,
                 can_filters=_kernel_filters(id_filter),
             )
-        except OSError as exc:
-            raise self._open_failure(exc) from exc
-        except can_module.CanError as exc:
+        except (OSError, can_module.CanError) as exc:
             raise self._open_failure(exc) from exc
 
-    def _open_failure(self, exc: BaseException) -> TransportError:
+    def _open_failure(self, exc: BaseException) -> FieldDeckError:
+        """Turn a python-can open failure into something an operator can act on."""
         facts = _link_facts(self.interface)
         if not facts["present"]:
-            return DeviceDisconnected(  # type: ignore[return-value]
+            return DeviceDisconnected(
                 f"{self.interface} no longer exists; the adapter was unplugged",
                 details={"interface": self.interface, "error": str(exc)},
                 preserved="nothing was read from or written to the bus",
             )
         hint = (
-            f"; the link is {facts['operstate']} — bring it up with: "
-            f"sudo ip link set {self.interface} up type can bitrate 500000"
-            if not facts["up"]
-            else ""
+            ""
+            if facts["up"]
+            else (
+                f"; the link is down — bring it up with: "
+                f"sudo ip link set {self.interface} up type can bitrate 500000"
+            )
         )
         return TransportError(
             f"cannot open {self.interface}: {exc}{hint}",
@@ -711,17 +803,18 @@ class SocketCanDriver(Driver):
         self,
         ctx: ActionContext,
         *,
+        action_name: str,
         duration_s: float,
         max_frames: int,
-        id_filter: list[int] | None,
+        id_filter: list[int] | None = None,
         sink: Callable[[list[dict[str, Any]]], None] | None = None,
         collect: bool = True,
     ) -> dict[str, Any]:
-        """Listen for frames.  Never transmits, on any path through here.
+        """Listen for frames.  No path through here transmits anything.
 
-        ``sink`` receives each drained batch so a capture reaches disk while
-        it is still running: a cancelled or timed-out capture must leave the
-        frames it already heard behind, not an empty file.
+        ``sink`` receives each drained batch so a capture reaches disk while it
+        is still running: a cancelled or timed-out capture must leave behind
+        the frames it already heard, not an empty file.
         """
         bus = await asyncio.to_thread(self._open_bus, id_filter=id_filter)
         clock = _RxClock(TimeAnchor.capture())
@@ -745,8 +838,8 @@ class SocketCanDriver(Driver):
                 if counts["count"] >= max_frames:
                     break
                 frame = _frame_dict(message, clock)
-                # Kernel filters are a coarse mask; this makes the returned
-                # set exactly what the operator asked for.
+                # The kernel filter is a coarse mask; this makes the delivered
+                # set exactly the ids the operator asked for.
                 if wanted is not None and frame["can_id"] not in wanted:
                     continue
                 counts["count"] += 1
@@ -772,17 +865,17 @@ class SocketCanDriver(Driver):
                 absorb(pump.drain())
                 if pump.dropped and not overflow_reported:
                     overflow_reported = True
-                    self._report_overflow(ctx, pump.dropped)
-                if pump.error is not None:
-                    break
-                if ctx.cancelled:
+                    self._report_overflow(ctx, action_name, pump.dropped)
+                if pump.error is not None or ctx.cancelled:
                     break
         finally:
             pump.stop()
             # Whatever the reader already pulled off the socket is evidence
-            # that was paid for; take it before the socket goes away.
+            # that has been paid for; take it before the socket goes away.
             absorb(pump.drain())
-            await asyncio.to_thread(bus.shutdown)
+            # Synchronous on purpose: an ``await`` here would be skipped when
+            # the action is being cancelled, and that leaks the socket.
+            bus.shutdown()
 
         if pump.error is not None:
             raise TransportError(
@@ -805,8 +898,8 @@ class SocketCanDriver(Driver):
             "anchor": clock.anchor.as_dict(),
         }
 
-    def _report_overflow(self, ctx: ActionContext, dropped: int) -> None:
-        """Say so, loudly and once: silent frame loss invalidates the analysis."""
+    def _report_overflow(self, ctx: ActionContext, action_name: str, dropped: int) -> None:
+        """Say so, once and loudly: silent frame loss invalidates the analysis."""
         ctx.emit(
             new_event(
                 EventType.CAPTURE_OVERFLOW,
@@ -814,7 +907,7 @@ class SocketCanDriver(Driver):
                 severity=EventSeverity.WARNING,
                 session_id=ctx.session_id,
                 device_id=self.device_id,
-                action="can.capture",
+                action=action_name,
                 request_id=ctx.request_id,
                 message=(
                     f"{self.interface} is delivering frames faster than they can be "
@@ -851,6 +944,7 @@ class SocketCanDriver(Driver):
         """Passive receive: the socket is opened and never given a frame to send."""
         outcome = await self._receive(
             ctx,
+            action_name="can.listen",
             duration_s=params.duration_s,
             max_frames=params.max_frames,
             id_filter=params.id_filter,
@@ -890,19 +984,21 @@ class SocketCanDriver(Driver):
 
         handle = path.open("w", encoding="ascii")
         written = 0
+        artifact: CaptureArtifact | None = None
 
         def write(batch: list[dict[str, Any]]) -> None:
             nonlocal written
             for frame in batch:
                 handle.write(_candump_line(self.interface, frame["utc_ns"], frame))
                 written += 1
-            # Flushing per batch, not per frame: a capture interrupted by a
+            # Flushed per batch rather than per frame: a capture killed by a
             # timeout or a pulled plug loses at most one drain interval.
             handle.flush()
 
         try:
             outcome = await self._receive(
                 ctx,
+                action_name="can.capture",
                 duration_s=params.duration_s,
                 max_frames=params.max_frames,
                 id_filter=params.id_filter,
@@ -911,33 +1007,38 @@ class SocketCanDriver(Driver):
             )
         finally:
             handle.close()
-            # Registered even when the capture was cancelled or timed out: an
-            # unregistered file on disk is a capture the operator cannot find.
-            artifact = recorder.add_artifact(
-                path,
-                kind="can",
-                media_type=_CANDUMP_MEDIA_TYPE,
-                device_id=self.device_id,
-                raw=True,
-                metadata={
-                    "frames": written,
-                    "bitrate": self.bitrate,
-                    "interface": self.interface,
-                    "format": "candump",
-                },
-            )
-            ctx.emit(
-                new_event(
-                    EventType.ARTIFACT_ADDED,
-                    source=ctx.source,
-                    session_id=ctx.session_id,
+            if written:
+                # Registered even when the capture was cancelled or timed out:
+                # an unregistered file is a capture the operator cannot find.
+                artifact = recorder.add_artifact(
+                    path,
+                    kind="can",
+                    media_type=_CANDUMP_MEDIA_TYPE,
                     device_id=self.device_id,
-                    action="can.capture",
-                    request_id=ctx.request_id,
-                    message=f"{written} frames written to {artifact.relative_path}",
-                    payload=artifact.model_dump(mode="json"),
+                    raw=True,
+                    metadata={
+                        "frames": written,
+                        "bitrate": self.bitrate,
+                        "interface": self.interface,
+                        "format": "candump",
+                    },
                 )
-            )
+                ctx.emit(
+                    new_event(
+                        EventType.ARTIFACT_ADDED,
+                        source=ctx.source,
+                        session_id=ctx.session_id,
+                        device_id=self.device_id,
+                        action="can.capture",
+                        request_id=ctx.request_id,
+                        message=f"{written} frames written to {artifact.relative_path}",
+                        payload=artifact.model_dump(mode="json"),
+                    )
+                )
+            else:
+                # An empty file in the session is worse than no file: it looks
+                # like evidence that the bus was quiet when in fact nothing ran.
+                path.unlink(missing_ok=True)
             ctx.emit(
                 new_event(
                     EventType.CAPTURE_STOPPED,
@@ -956,8 +1057,8 @@ class SocketCanDriver(Driver):
             **outcome,
             "frames": sample,
             "truncated_in_result": outcome["count"] > len(sample),
-            "path": str(path),
-            "artifact": artifact.model_dump(mode="json"),
+            "path": str(path) if artifact is not None else None,
+            "artifact": artifact.model_dump(mode="json") if artifact is not None else None,
         }
 
     @action(
@@ -969,13 +1070,13 @@ class SocketCanDriver(Driver):
         timeout_s=120.0,
     )
     async def can_stats(self, ctx: ActionContext, params: CanStatsParams) -> dict[str, Any]:
-        from fielddeck.analysis.timing import summarize_periods  # noqa: PLC0415 - keeps import cost off the discovery path
+        from fielddeck.analysis.timing import summarize_periods
 
         listen = await self._receive(
             ctx,
+            action_name="can.stats",
             duration_s=params.duration_s,
             max_frames=200_000,
-            id_filter=None,
         )
 
         by_id: dict[int, list[int]] = {}
@@ -1009,10 +1110,10 @@ class SocketCanDriver(Driver):
         elapsed = max(listen["duration_s"], 1e-9)
         if self.bitrate:
             load: float | None = round(min(100.0, bits / (self.bitrate * elapsed) * 100), 1)
-            load_note = "nominal, excluding bit stuffing; the real figure is up to ~20% higher"
+            load_note = "nominal; bit stuffing makes the true figure up to ~20% higher"
         else:
             load = None
-            load_note = f"{self.interface} reports no bitrate; bus load cannot be computed"
+            load_note = f"{self.interface} reports no bitrate, so bus load cannot be computed"
 
         return {
             "interface": self.interface,
@@ -1057,7 +1158,7 @@ class SocketCanDriver(Driver):
             )
         if not facts["up"]:
             raise TransportError(
-                f"{self.interface} is {facts['operstate']}; bring it up with: "
+                f"{self.interface} is down; bring it up deliberately with: "
                 f"sudo ip link set {self.interface} up type can bitrate <bitrate>",
                 details={"interface": self.interface, "operstate": facts["operstate"]},
                 preserved="nothing was transmitted",
@@ -1065,12 +1166,12 @@ class SocketCanDriver(Driver):
 
         controller = _controller_summary(await self._link_details())
         if controller.get("listen_only") is True:
-            # Refuse rather than "fix" it: clearing listen-only means taking a
-            # live bus interface down, which is not a side effect of sending
-            # one frame.
+            # Refuse rather than "fix" it.  Clearing listen-only means taking a
+            # live bus interface down, which is not a side effect anyone should
+            # get from asking to send one frame.
             raise TransportError(
-                f"{self.interface} is configured listen-only; FieldDeck will not reconfigure "
-                f"the link to transmit. Take it down and clear the ctrlmode deliberately: "
+                f"{self.interface} is configured listen-only and FieldDeck will not "
+                f"reconfigure the link to transmit; clear it deliberately with: "
                 f"sudo ip link set {self.interface} down && "
                 f"sudo ip link set {self.interface} type can listen-only off",
                 details={"interface": self.interface, "ctrlmode": controller.get("ctrlmode")},
@@ -1085,7 +1186,7 @@ class SocketCanDriver(Driver):
             is_fd=False,
         )
 
-        # Unlock before the first frame leaves, never after: a banner that
+        # Unlocked before the first frame leaves, never after: a banner that
         # under-reports transmit capability is worse than one that over-reports.
         self._tx_unlocked = True
         self._descriptor.metadata["mode"] = "normal"
@@ -1094,10 +1195,10 @@ class SocketCanDriver(Driver):
         try:
             sent = await asyncio.to_thread(self._send_blocking, bus, message, params.count)
         finally:
-            # The TX socket lives exactly as long as the transmission; the
-            # mode flag stays set until safe_state so the operator can see
-            # that this interface has transmitted.
-            await asyncio.to_thread(bus.shutdown)
+            # The TX socket lives exactly as long as the transmission does.
+            # The mode flag stays set until safe_state, so an operator reading
+            # the banner can see that this interface has transmitted.
+            bus.shutdown()
 
         self._tx_count += sent
         ts = Timestamp.now()
@@ -1110,15 +1211,15 @@ class SocketCanDriver(Driver):
             "interface": self.interface,
             "monotonic_ns": ts.monotonic_ns,
             "mode": "normal",
-            "safe_state_note": "run safety.safe_state or ESTOP to return this interface to listen-only",
+            "safe_state_note": "safe state returns this interface to listen-only",
         }
 
     def _send_blocking(self, bus: Any, message: Any, count: int) -> int:
         """Transmit ``count`` copies from a worker thread.
 
-        Reports how many frames actually reached the controller when the
-        transmission fails part way: "it failed" is not an answer when the
-        question is what the DUT already saw.
+        Reports how many frames actually reached the controller if the
+        transmission fails part way through: "it failed" is not an answer when
+        the question is what the DUT already saw.
         """
         can_module = _require_can()
         sent = 0
@@ -1175,7 +1276,7 @@ class SocketCanDriver(Driver):
 
         try:
             database = await asyncio.to_thread(cantools.database.load_file, str(dbc_path))
-        except Exception as exc:  # noqa: BLE001 - cantools raises a family of parse errors; all of them mean the same thing to the operator
+        except Exception as exc:  # noqa: BLE001 - cantools raises a family of parse errors that all mean one thing to the operator
             raise InvalidRequest(
                 f"cannot read {dbc_path.name} as a CAN database: {exc}",
                 details={"dbc": str(dbc_path), "error": str(exc)},
@@ -1198,8 +1299,8 @@ class SocketCanDriver(Driver):
             kind="can-decoded",
             media_type="text/csv",
             device_id=self.device_id,
-            # The provenance chain: this file is derived, from that capture,
-            # by that version of that tool, using a DBC with that hash.
+            # The provenance chain: derived, from that capture, by that version
+            # of that tool, using a database with that hash.
             raw=False,
             source_artifact_ids=[source_artifact_id] if source_artifact_id else [],
             producer="cantools",
@@ -1221,7 +1322,9 @@ class SocketCanDriver(Driver):
                 device_id=self.device_id,
                 action="can.decode",
                 request_id=ctx.request_id,
-                message=f"decoded {summary['decoded_frames']} frames into {artifact.relative_path}",
+                message=(
+                    f"decoded {summary['decoded_frames']} frames into {artifact.relative_path}"
+                ),
                 payload=artifact.model_dump(mode="json"),
             )
         )
@@ -1239,107 +1342,33 @@ class SocketCanDriver(Driver):
 
 
 # ---------------------------------------------------------------------------
-# helpers used by the driver
+# Decoding
 # ---------------------------------------------------------------------------
 
 
-def _can_version() -> str | None:
-    module = _load_can()
-    return getattr(module, "__version__", None) if module is not None else None
-
-
-def _frame_dict(message: Any, clock: _RxClock) -> dict[str, Any]:
-    """One received frame, in FieldDeck terms."""
-    monotonic, utc = clock.project(float(message.timestamp or 0.0))
-    data = bytes(message.data or b"")
-    return {
-        "monotonic_ns": monotonic,
-        "utc_ns": utc,
-        "can_id": int(message.arbitration_id),
-        "extended": bool(message.is_extended_id),
-        "dlc": int(message.dlc or len(data)),
-        "data": data.hex(),
-        "error": bool(message.is_error_frame),
-        "remote": bool(message.is_remote_frame),
-        "fd": bool(getattr(message, "is_fd", False)),
-        "brs": bool(getattr(message, "bitrate_switch", False)),
-        "esi": bool(getattr(message, "error_state_indicator", False)),
-        # False for frames this machine transmitted (loopback).  Everything on
-        # a vcan interface is locally generated, so vcan reports False here.
-        "rx": bool(getattr(message, "is_rx", True)),
-        # Present so a real capture has the same shape as the simulated one;
-        # a description needs a DBC, which belongs to can.decode.
-        "description": None,
-    }
-
-
-def _controller_summary(details: dict[str, Any] | None) -> dict[str, Any]:
-    """Pull the CAN controller facts out of ``ip -details -json`` output."""
-    if not details:
-        return {"source": None, "listen_only": None, "state": None}
-    info = details.get("linkinfo") or {}
-    data = info.get("info_data") or {}
-    ctrlmode = [str(flag).lower() for flag in (data.get("ctrlmode") or [])]
-    bittiming = data.get("bittiming") or {}
-    return {
-        "source": "ip -details link",
-        "kind": info.get("info_kind"),
-        "listen_only": ("listen-only" in ctrlmode) if data else None,
-        "ctrlmode": ctrlmode,
-        "state": data.get("state"),
-        "bitrate": bittiming.get("bitrate"),
-        "sample_point": bittiming.get("sample_point"),
-        "berr_counter": data.get("berr_counter"),
-        "restart_ms": data.get("restart_ms"),
-    }
-
-
-def _bitrate_evidence(*, bitrate: int | None, valid_frames: int, error_frames: int) -> dict[str, Any]:
-    """What the traffic says about the configured bitrate, without transmitting.
-
-    This is the whole of FieldDeck's bitrate story on purpose.  Autodetection
-    by transmitting an ACK, or by cycling the link through candidate bitrates,
-    disturbs a bus that may be driving something; watching is free.
-    """
-    if valid_frames == 0 and error_frames > 0:
-        verdict = "likely wrong: only error frames were seen"
-    elif valid_frames == 0:
-        verdict = "no evidence: the bus was silent"
-    elif error_frames > valid_frames:
-        verdict = "suspect: error frames outnumber valid frames"
-    else:
-        verdict = "consistent: valid frames were received"
-    return {
-        "configured_bitrate": bitrate,
-        "valid_frames": valid_frames,
-        "error_frames": error_frames,
-        "verdict": verdict,
-        "method": "passive observation only; FieldDeck never transmits to detect a bitrate",
-    }
-
-
-def _resolve_capture(recorder: Any, params: CanDecodeParams) -> tuple[Path, str | None]:
+def _resolve_capture(recorder: SessionRecorder, params: CanDecodeParams) -> tuple[Path, str | None]:
     """Find the capture to decode, and its artifact id if it has one.
 
     Paths are confined to the sessions directory.  The daemon holds device
-    permissions an operator's shell may not, so it must not be usable as a
-    "read me any file" oracle by a recipe or the MCP surface.
+    permissions the calling client may not, so it must not double as a "read me
+    any file" oracle for a recipe or for the MCP surface.
     """
     registered = recorder.timeline.artifacts()
-    root: Path = recorder.root
-    sessions_root = root.parent
+    root = recorder.root
+    sessions_root = root.parent.resolve()
 
     if params.artifact_id:
         for row in registered:
-            if row["artifact_id"] == params.artifact_id:
-                path = root / str(row["relative_path"])
-                if not path.is_file():
-                    raise CaptureError(
-                        f"artifact {params.artifact_id} is registered but its file is missing",
-                        details={"artifact_id": params.artifact_id, "path": str(path)},
-                        preserved="the session index is unchanged",
-                    )
-                return path, params.artifact_id
+            if row["artifact_id"] != params.artifact_id:
+                continue
+            path = root / str(row["relative_path"])
+            if not path.is_file():
+                raise CaptureError(
+                    f"artifact {params.artifact_id} is registered but its file is missing",
+                    details={"artifact_id": params.artifact_id, "path": str(path)},
+                    preserved="the session index is unchanged",
+                )
+            return path, params.artifact_id
         raise InvalidRequest(
             f"no artifact {params.artifact_id} in the current session",
             details={"artifact_id": params.artifact_id},
@@ -1347,11 +1376,11 @@ def _resolve_capture(recorder: Any, params: CanDecodeParams) -> tuple[Path, str 
         )
 
     candidate = Path(str(params.path)).expanduser()
-    resolved = (root / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
-    if not resolved.is_relative_to(sessions_root.resolve()):
+    resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    if not resolved.is_relative_to(sessions_root):
         raise InvalidRequest(
-            f"{resolved} is outside the sessions directory; decode reads captures, not arbitrary "
-            "files",
+            f"{resolved} is outside the sessions directory; can.decode reads captures, "
+            "not arbitrary files",
             details={"path": str(resolved), "allowed_root": str(sessions_root)},
             preserved="nothing was read",
         )
@@ -1370,18 +1399,19 @@ def _resolve_capture(recorder: Any, params: CanDecodeParams) -> tuple[Path, str 
 def _decode_file(database: Any, source: Path, destination: Path, max_frames: int) -> dict[str, Any]:
     """Decode a candump log into a CSV of signal values.
 
-    Runs on a worker thread: a long capture is a lot of lines, and the event
+    Runs on a worker thread: a long capture is a lot of lines and the event
     loop has an HMI to keep responsive.  The source is opened read-only and is
-    never written back to.
+    never written back to — that is the whole point of a derived artifact.
     """
-    decoded_frames = 0
     read_frames = 0
+    decoded_frames = 0
+    rows_written = 0
     malformed = 0
     skipped_special = 0
     decode_errors = 0
     unknown_ids: dict[int, int] = {}
     first_error: str | None = None
-    rows_written = 0
+    units: dict[str, dict[str, str | None]] = {}
 
     with (
         source.open("r", encoding="ascii", errors="replace") as handle,
@@ -1389,7 +1419,17 @@ def _decode_file(database: Any, source: Path, destination: Path, max_frames: int
     ):
         writer = csv.writer(out)
         writer.writerow(
-            ["utc_s", "interface", "can_id", "extended", "message", "signal", "value", "unit", "raw"]
+            [
+                "utc_s",
+                "interface",
+                "can_id",
+                "extended",
+                "message",
+                "signal",
+                "value",
+                "unit",
+                "raw",
+            ]
         )
         for line in handle:
             if read_frames >= max_frames:
@@ -1401,6 +1441,8 @@ def _decode_file(database: Any, source: Path, destination: Path, max_frames: int
                 continue
             read_frames += 1
             if frame.error or frame.remote:
+                # Neither carries signal data; they are counted so the summary
+                # still adds up to the number of lines in the capture.
                 skipped_special += 1
                 continue
             try:
@@ -1411,21 +1453,23 @@ def _decode_file(database: Any, source: Path, destination: Path, max_frames: int
                 unknown_ids[frame.can_id] = unknown_ids.get(frame.can_id, 0) + 1
                 continue
             try:
-                signals = message.decode(
-                    frame.data, decode_choices=True, allow_truncated=True
-                )
-            except Exception as exc:  # noqa: BLE001 - cantools raises several decode errors; a bad frame must not abort the file
+                # allow_truncated: a real bus contains short frames, and one
+                # malformed payload must not abandon the rest of the file.
+                signals = message.decode(frame.data, decode_choices=True, allow_truncated=True)
+            except Exception as exc:  # noqa: BLE001 - cantools raises several decode errors; a bad frame is data, not a crash
                 decode_errors += 1
                 if first_error is None:
                     first_error = f"0x{frame.can_id:X}: {exc}"
                 continue
             decoded_frames += 1
+
+            message_units = units.get(message.name)
+            if message_units is None:
+                message_units = {signal.name: signal.unit for signal in message.signals}
+                units[message.name] = message_units
+
             width = 8 if frame.extended else 3
             for name, value in signals.items():
-                unit = None
-                signal = message.get_signal_by_name(name) if hasattr(message, "get_signal_by_name") else None
-                if signal is not None:
-                    unit = signal.unit
                 writer.writerow(
                     [
                         f"{frame.utc_s:.6f}",
@@ -1434,8 +1478,8 @@ def _decode_file(database: Any, source: Path, destination: Path, max_frames: int
                         int(frame.extended),
                         message.name,
                         name,
-                        value if not isinstance(value, (bytes, bytearray)) else value.hex(),
-                        unit or "",
+                        value.hex() if isinstance(value, (bytes, bytearray)) else value,
+                        message_units.get(name) or "",
                         frame.data.hex().upper(),
                     ]
                 )
@@ -1462,10 +1506,10 @@ def _decode_file(database: Any, source: Path, destination: Path, max_frames: int
 def discover_can_drivers(config: FieldDeckConfig) -> list[Driver]:
     """Build a driver for every SocketCAN interface on this machine.
 
-    Enumeration itself is sysfs-only (see :mod:`fielddeck.discovery.linux`);
-    no socket is opened here and nothing reaches the bus.  Interfaces that are
-    down are still returned, carrying the warning that says so — an operator
-    debugging "why can't I see can0" needs to see can0.
+    Enumeration itself is sysfs-only (see :mod:`fielddeck.discovery.linux`): no
+    socket is opened here and nothing reaches a bus.  Interfaces that are down
+    are still returned, carrying the warning that says so — an operator asking
+    "why can't I see can0" needs to see can0.
     """
     if _load_can() is None:
         _log.info(
@@ -1474,17 +1518,14 @@ def discover_can_drivers(config: FieldDeckConfig) -> list[Driver]:
         )
         return []
 
-    drivers: list[Driver] = []
-    for entry in list_can_interfaces():
-        drivers.append(
-            SocketCanDriver(
-                str(entry["interface"]),
-                bitrate=entry.get("bitrate"),
-                fd_capable=bool(entry.get("fd_capable")),
-                up=bool(entry.get("up")),
-                virtual=bool(entry.get("virtual")),
-                mtu=int(entry.get("mtu") or 0),
-                ip_tool=config.tools.ip,
-            )
+    return [
+        SocketCanDriver(
+            str(entry["interface"]),
+            bitrate=entry.get("bitrate"),
+            fd_capable=bool(entry.get("fd_capable")),
+            virtual=bool(entry.get("virtual")),
+            mtu=int(entry.get("mtu") or 0),
+            ip_tool=config.tools.ip,
         )
-    return drivers
+        for entry in list_can_interfaces()
+    ]
