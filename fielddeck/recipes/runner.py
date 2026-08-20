@@ -292,11 +292,22 @@ class RecipeRunner:
             self._cancelled = True
             self._state = RecipeState.CANCELLING
             self._reason = self._reason or "the recipe run was cancelled"
+            self._stop.set()
+            await self._classify_stop()
             await self._shielded_cleanup()
             self._finish_state()
             self._emit_finished()
             raise
+        except FieldDeckError as exc:
+            # The step loop turns step failures into records, so reaching here
+            # means something outside a step broke -- the socket, most likely.
+            # Cleanup runs anyway: that is the whole promise of this phase.
+            self._failure = self._failure or exc.to_dict()
+            self._reason = self._reason or exc.message
+            self._stop.set()
+            await self._cleanup()
         else:
+            await self._classify_stop()
             await self._cleanup()
         self._finish_state()
         self._emit_finished()
@@ -447,6 +458,24 @@ class RecipeRunner:
             self._stop.set()
             return False
         return True
+
+    async def _classify_stop(self) -> None:
+        """Work out *why* the run is stopping, once, on the way out.
+
+        A step that was cancelled looks the same from the client side whether an
+        operator asked for it or an emergency stop took the whole bench down.
+        The difference matters to whoever reads the report afterwards, so the
+        safety state is read one last time to attribute it correctly.
+        """
+        if not self._stop.is_set() or self._estop:
+            return
+        try:
+            safety = await self.client.call("safety.status")
+        except FieldDeckError:
+            return
+        if safety.get("estop_active"):
+            self._estop = True
+            self._reason = f"emergency stop: {safety.get('estop_reason') or 'engaged'}"
 
     def _skipped(self, step: PlannedStep) -> list[StepRecord]:
         return [
@@ -644,7 +673,10 @@ class RecipeRunner:
                 return
             with contextlib.suppress(FieldDeckError):
                 await self.client.call("action.cancel", {"request_id": request_id})
-            with contextlib.suppress(TimeoutError):
+            # FieldDeckError is suppressed rather than handled: the step's own
+            # failure is re-raised by the caller's ``await call`` and recorded
+            # there.  Letting it escape here would skip the cleanup phase.
+            with contextlib.suppress(TimeoutError, FieldDeckError):
                 await asyncio.wait_for(asyncio.shield(call), CLEANUP_STEP_TIMEOUT_S)
         finally:
             stop.cancel()
