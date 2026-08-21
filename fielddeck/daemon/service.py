@@ -8,6 +8,7 @@ safe, never a restoration of whatever was armed before the power went out.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import importlib
@@ -43,7 +44,7 @@ from fielddeck.daemon.registry import DeviceRegistry
 from fielddeck.daemon.rpc import ClientConnection, RpcServer
 from fielddeck.safety.manager import SafetyManager
 
-__all__ = ["InstrumentDaemon"]
+__all__ = ["InstrumentDaemon", "build_parser"]
 
 _log = get_logger("fielddeck.daemon.service")
 
@@ -607,9 +608,96 @@ class InstrumentDaemon:
     }
 
 
+def build_parser() -> argparse.ArgumentParser:
+    """The ``instrumentd`` command line.
+
+    Deliberately small.  Anything that shapes how the daemon *behaves* — limits,
+    presets, aliases, denied permission classes — belongs in the config files,
+    where it is reviewable and survives a restart, not in a command line that
+    only the person who typed it ever sees.
+
+    What is here is the set of things that have to be settable before any
+    config is read: where to listen, which config to read, and how loudly to
+    log while finding out.
+    """
+    parser = argparse.ArgumentParser(
+        prog="instrumentd",
+        description=(
+            "The FieldDeck hardware daemon: the single process permitted to "
+            "open a serial port, a CAN interface, an I2C or SPI bus, a debug "
+            "probe or a USB instrument. Boots SAFE."
+        ),
+        epilog=(
+            "Safety policy lives in safety.yaml, not here. There is deliberately "
+            "no flag that arms a permission class at startup: a unit that boots "
+            "armed is a unit nobody authorized."
+        ),
+    )
+    parser.add_argument(
+        "--socket",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Control socket to listen on. Defaults to the install layout. "
+            "The restricted AI socket is created beside it as instrumentd-ai.sock."
+        ),
+    )
+    parser.add_argument(
+        "--config-dir",
+        type=Path,
+        metavar="DIR",
+        help="Directory holding fielddeck.yaml and safety.yaml.",
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        type=str.upper,
+        help="Override the configured log level.",
+    )
+    parser.add_argument(
+        "--log-text",
+        action="store_true",
+        help="Human-readable log lines instead of JSON. For running by hand.",
+    )
+    parser.add_argument(
+        "--simulate",
+        action="store_true",
+        help=(
+            "Attach the simulated bench instead of discovering hardware. "
+            "Equivalent to FIELDDECK_SIM=1."
+        ),
+    )
+    parser.add_argument(
+        "--no-ai-socket",
+        action="store_true",
+        help=(
+            "Do not create the restricted socket. The MCP server cannot connect "
+            "at all, rather than connecting with reduced authority."
+        ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"instrumentd {__version__} (RPC protocol {RPC_PROTOCOL_VERSION})",
+    )
+    return parser
+
+
 async def amain(argv: list[str] | None = None) -> int:
-    daemon = InstrumentDaemon()
-    configure_logging(daemon.config.logging.level, json_output=daemon.config.logging.json_output)
+    args = build_parser().parse_args(argv)
+    if args.simulate:
+        os.environ["FIELDDECK_SIM"] = "1"
+    if args.config_dir is not None:
+        os.environ["FIELDDECK_CONFIG_DIR"] = str(args.config_dir)
+
+    daemon = InstrumentDaemon(
+        socket_path=args.socket,
+        enable_restricted_socket=not args.no_ai_socket,
+    )
+    configure_logging(
+        args.log_level or daemon.config.logging.level,
+        json_output=not args.log_text and daemon.config.logging.json_output,
+    )
     await daemon.serve_forever()
     return 0
 
