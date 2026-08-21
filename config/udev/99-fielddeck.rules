@@ -1,0 +1,220 @@
+# FieldDeck device access rules.
+# Installed as /etc/udev/rules.d/99-fielddeck.rules
+#
+# WHY THIS FILE EXISTS
+#
+# instrumentd runs as the unprivileged 'fielddeck' user. That is the whole
+# security story of the product: the one process allowed to touch hardware is
+# also a process that cannot touch anything else. It only works if the device
+# nodes themselves are reachable by that user, which is what these rules do —
+# they put the adapters, probes and instruments FieldDeck knows how to drive
+# into the 'fielddeck' group.
+#
+# The alternative is running the daemon as root, and then every bug in every
+# optional hardware library is a root bug.
+#
+# WHAT THIS COSTS YOU, AND HOW TO GET IT BACK
+#
+# Debian's default is GROUP="dialout" on USB serial nodes. Setting GROUP here
+# REPLACES that, so other software that expects dialout (minicom, screen,
+# Arduino IDE) loses access to these specific adapters. Two ways out:
+#
+#   * add those users to the fielddeck group too:  sudo usermod -aG fielddeck alice
+#   * or delete the SUBSYSTEM=="tty" rules below and rely instead on the
+#     fielddeck user's own dialout membership, which scripts/install.sh also
+#     sets up. The daemon works either way; the tty rules exist because not
+#     every distribution ships the dialout default, and because group
+#     membership you can see in a file beats group membership you inherited.
+#
+# WHAT IS DELIBERATELY NOT HERE
+#
+#   * TAG+="uaccess". That grants access to whoever is physically logged in at
+#     the seat, which is a different and much vaguer statement than "the group
+#     that owns hardware". Group membership is auditable; a seat is not.
+#   * Anything that runs a program. RUN+= turns a plugged cable into code
+#     execution, and there is nothing here worth that.
+#   * CAN interfaces. Bringing a CAN link up energises a transceiver on
+#     somebody's bus and stays a deliberate root action:
+#         sudo ip link set can0 up type can bitrate 500000 listen-only on
+#   * GPIO, I2C and SPI. Raspberry Pi OS already assigns those to the gpio,
+#     i2c and spi groups in its own rules, and the installer adds the fielddeck
+#     user to them. Duplicating that here would just be a second thing to keep
+#     in sync.
+#
+# AFTER EDITING
+#
+#     sudo udevadm control --reload-rules
+#     sudo udevadm trigger --subsystem-match=usb --subsystem-match=tty --action=change
+#
+# TO DEBUG ONE DEVICE
+#
+#     udevadm info -a -n /dev/ttyUSB0        # every attribute you can match on
+#     udevadm test /sys/class/tty/ttyUSB0    # which rules actually fired
+#     ls -l /dev/ttyUSB0                     # what you ended up with
+#
+# TO ADD YOUR OWN, get the ids from lsusb (vendor:product, lowercase hex) and
+# copy the closest pair of lines below. Keep the comment: in a year the id will
+# mean nothing and the comment will mean everything.
+
+# ===========================================================================
+# USB serial bridges
+#
+# Two rules each: the tty node is how pyserial talks to it, and the usb_device
+# node is how libusb-based tools (esptool in some modes, openocd for the
+# FT2232-based probes) talk to the same chip.
+# ===========================================================================
+
+# FTDI — FT232R/FT232H/FT2232/FT4232. The default USB-serial cable, and the
+# front end of a lot of JTAG adapters.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", GROUP="fielddeck", MODE="0660"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0403", GROUP="fielddeck", MODE="0660"
+
+# Silicon Labs CP210x — CP2102/CP2104/CP2105. Extremely common on ESP32 boards
+# and on cheap RS-485 dongles.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", GROUP="fielddeck", MODE="0660"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="10c4", GROUP="fielddeck", MODE="0660"
+
+# WCH CH340/CH341 — the cheapest bridge there is, and also the WCH-Link RISC-V
+# debug probe (1a86:8010), which is why this vendor appears again below.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", GROUP="fielddeck", MODE="0660"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1a86", GROUP="fielddeck", MODE="0660"
+
+# Prolific PL2303 — older USB-serial cables, still everywhere in the field.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="067b", GROUP="fielddeck", MODE="0660"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="067b", GROUP="fielddeck", MODE="0660"
+
+# Microchip/Atmel MCP2200 and friends, and Microchip's USB-UART bridges.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="04d8", GROUP="fielddeck", MODE="0660"
+
+# ===========================================================================
+# USBTMC — bench instruments (scopes, supplies, DMMs, loads)
+#
+# Two paths exist and both need covering:
+#   1. The kernel's usbtmc driver claims the interface and exposes
+#      /dev/usbtmc0. pyvisa-py can use it directly.
+#   2. Nothing claims it, and pyusb/pyvisa-py drives it over libusb through
+#      /dev/bus/usb/BBB/DDD.
+# ===========================================================================
+
+# Path 1: the kernel character device, whatever the vendor.
+SUBSYSTEM=="usbtmc", GROUP="fielddeck", MODE="0660"
+KERNEL=="usbtmc[0-9]*", GROUP="fielddeck", MODE="0660"
+
+# Path 2: libusb access, by vendor. A USBTMC device is identified by an
+# interface class of 0xFE/0x03, but udev matches attributes upward from a node,
+# never downward into it, so a device node cannot be matched on its interface's
+# class. Vendor ids it is.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0957", GROUP="fielddeck", MODE="0660"  # Keysight / Agilent / HP
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2a8d", GROUP="fielddeck", MODE="0660"  # Keysight (newer range)
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0699", GROUP="fielddeck", MODE="0660"  # Tektronix
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1ab1", GROUP="fielddeck", MODE="0660"  # Rigol (DP800 supplies, DL3000 loads, DS scopes)
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="f4ec", GROUP="fielddeck", MODE="0660"  # Siglent (SPD supplies, SDL loads, SDS scopes)
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0aad", GROUP="fielddeck", MODE="0660"  # Rohde & Schwarz / Hameg
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="05e6", GROUP="fielddeck", MODE="0660"  # Keithley
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="05ff", GROUP="fielddeck", MODE="0660"  # LeCroy
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="5345", GROUP="fielddeck", MODE="0660"  # Owon
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0416", GROUP="fielddeck", MODE="0660"  # Nuvoton bridge — Korad/Tenma/RND supplies
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="164e", GROUP="fielddeck", MODE="0660"  # GW Instek
+
+# ===========================================================================
+# SWD / JTAG debug probes
+#
+# These vendor and product ids are the same table FieldDeck's probe detection
+# uses (fielddeck/debug/probes.py). If you add a probe there, add it here too
+# or it will be recognised and then be unopenable, which is a confusing pair of
+# symptoms to hit at once.
+#
+# openocd, pyocd and dfu-util all reach these through libusb, so the
+# usb_device node is the one that matters. Probes that also present a serial
+# port (Black Magic, ST-Link/V2-1's VCP) are covered by the tty rules as well.
+# ===========================================================================
+
+# STMicroelectronics — ST-Link/V2 (3748), V2-1 (374b), V3 (374e/374f/3754),
+# and the STM32 DFU bootloader (df11) that dfu-util talks to.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0483", GROUP="fielddeck", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", GROUP="fielddeck", MODE="0660"
+
+# SEGGER J-Link, including the OB variants soldered onto eval boards.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1366", GROUP="fielddeck", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1366", GROUP="fielddeck", MODE="0660"
+
+# ARM CMSIS-DAP / DAPLink reference probes.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0d28", GROUP="fielddeck", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0d28", GROUP="fielddeck", MODE="0660"
+
+# Keil-branded CMSIS-DAP (ULINK and clones).
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="c251", GROUP="fielddeck", MODE="0660"
+
+# pid.codes / OpenMoko range — Black Magic Probe (1d50:6018) lives here, as do
+# a lot of open-hardware probes and the Open Bench Logic Sniffer.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1d50", GROUP="fielddeck", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1d50", GROUP="fielddeck", MODE="0660"
+
+# InterBiometrics / pid.codes 1209 — Orbtrace and other community probes.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1209", GROUP="fielddeck", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", GROUP="fielddeck", MODE="0660"
+
+# Raspberry Pi — the Debug Probe (2e8a:000c) and any RP2040 in BOOTSEL mode
+# (2e8a:0003), which is what picotool loads firmware through.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2e8a", GROUP="fielddeck", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", GROUP="fielddeck", MODE="0660"
+
+# Atmel/Microchip EDBG on Xplained boards.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="03eb", GROUP="fielddeck", MODE="0660"
+
+# Texas Instruments — ICDI (1cbe) and XDS110 (0451).
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1cbe", GROUP="fielddeck", MODE="0660"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0451", GROUP="fielddeck", MODE="0660"
+
+# Espressif native USB (303a) — USB-JTAG/serial on ESP32-C3/S3, used by esptool.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="303a", GROUP="fielddeck", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", GROUP="fielddeck", MODE="0660"
+
+# ===========================================================================
+# Logic analyzers
+#
+# sigrok-cli drives these over libusb. Note that an unconfigured Cypress FX2
+# enumerates with the *Cypress* ids until firmware is uploaded into it, and
+# then re-enumerates with the vendor's own ids — so both need to be reachable
+# or the upload half of the transaction fails.
+# ===========================================================================
+
+# Cypress FX2 in its factory state — every fx2lafw clone starts life here.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="04b4", GROUP="fielddeck", MODE="0660"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0547", GROUP="fielddeck", MODE="0660"
+
+# The "Saleae Logic" clones that fx2lafw actually drives (0925:3881).
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0925", GROUP="fielddeck", MODE="0660"
+
+# Genuine Saleae Logic / Logic Pro.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="21a9", GROUP="fielddeck", MODE="0660"
+
+# Kingst LA1010/LA2016 and similar.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="77a1", GROUP="fielddeck", MODE="0660"
+
+# Hantek USB scopes and logic analyzers that sigrok supports.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="049f", GROUP="fielddeck", MODE="0660"
+
+# ===========================================================================
+# CDC-ACM catch-all
+#
+# Deliberately last and deliberately narrow. /dev/ttyACM* is a broad class —
+# it includes probes, dev boards, modems and anything else that speaks CDC —
+# so this only fires for devices whose interface is genuinely CDC-ACM (class
+# 0x02) rather than for every ttyACM node on the system.
+#
+# If you would rather not have this at all, delete it: the fielddeck user is
+# also in dialout, which is where Debian puts ttyACM nodes by default.
+# ===========================================================================
+SUBSYSTEM=="tty", KERNEL=="ttyACM[0-9]*", ATTRS{bInterfaceClass}=="02", GROUP="fielddeck", MODE="0660"
+
+# ===========================================================================
+# hidraw — HID-based debug adapters and some bench meters
+#
+# Narrow on purpose: only devices from the vendors already named above. A
+# blanket hidraw rule would hand the daemon the keyboard and the mouse, which
+# it has no business reading.
+# ===========================================================================
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0d28", GROUP="fielddeck", MODE="0660"  # CMSIS-DAP v2
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1366", GROUP="fielddeck", MODE="0660"  # J-Link
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="c251", GROUP="fielddeck", MODE="0660"  # Keil CMSIS-DAP

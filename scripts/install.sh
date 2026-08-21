@@ -110,7 +110,7 @@ Options:
   --no-kiosk        Daemon only: no Xorg, no terminal, no tmux, no HMI unit.
                     Use this for a headless unit driven over SSH with fdctl.
   --no-apt          Skip apt entirely. Assumes you have already provided the
-                    packages listed by --help-packages.
+                    packages the "Skipping apt" step lists.
   --from-lock       Install Python dependencies from PREFIX/requirements.lock
                     instead of resolving them fresh. Reproduces an earlier unit.
   --dry-run         Print every command instead of running it. Needs no root.

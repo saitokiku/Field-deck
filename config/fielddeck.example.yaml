@@ -1,0 +1,225 @@
+# FieldDeck — operator configuration.
+# Installed as /etc/fielddeck/fielddeck.yaml. Copy, edit, restart:
+#
+#     sudo systemctl restart instrumentd
+#
+# This file holds convenience: what the panel looks like, where captures go,
+# which presets appear in the pickers, what your devices are called. Nothing
+# here can widen what FieldDeck is allowed to do — hard limits and authorization
+# live in safety.yaml, which is a separate file on purpose.
+#
+# Every key is optional. A missing file, or a missing section, means the
+# built-in defaults, which are the values shown below. Unknown keys are a hard
+# error rather than a silent no-op: a typo'd option that quietly does nothing is
+# a setting you believe you have and do not.
+
+# ---------------------------------------------------------------------------
+# display — the 480x320 panel, described in character cells
+# ---------------------------------------------------------------------------
+display:
+  # The HMI is laid out for exactly this. 80 columns x 6 px = 480, 25 rows x
+  # 12 px = 300, which is why /etc/fielddeck/xinitrc starts xterm with the 6x12
+  # font at 80x25. Change these only if you also change the terminal's font or
+  # panel; the two must agree or the bottom row of the panel is off-screen.
+  columns: 80
+  rows: 25
+
+  # Physical panel size. Used for touch-target sizing hints and for the record
+  # in session metadata; it does not resize anything.
+  width_px: 480
+  height_px: 320
+
+  # The minimum size of a touchable control, in cells. Derived from a 90x45 px
+  # fingertip: 90/6 = 15 columns, 45/12 ~ 3 rows. Raise these for gloved hands
+  # or a panel with a thick overlay; lower them and you will start hitting the
+  # wrong tile, which on this device can mean the wrong permission class.
+  min_touch_cols: 15
+  min_touch_rows: 3
+
+  # Drop colour entirely. For monochrome panels, and for sunlight where a
+  # washed-out colour scheme becomes unreadable. State is then carried by text
+  # and position rather than by red/green, which is also the right behaviour for
+  # colour-blind operators.
+  monochrome: false
+
+# ---------------------------------------------------------------------------
+# storage — where recorded evidence lives
+# ---------------------------------------------------------------------------
+storage:
+  # Null means /var/lib/fielddeck/sessions (or $FIELDDECK_SESSIONS_DIR).
+  #
+  # Pointing this at an external SSD is the common case for a field unit and
+  # needs one extra step: ProtectSystem=strict in instrumentd.service makes
+  # everything outside /var/lib/fielddeck read-only, so also run
+  #     sudo systemctl edit instrumentd
+  # and add:
+  #     [Service]
+  #     ReadWritePaths=/mnt/ssd/fielddeck
+  # Without it, captures fail with EROFS and the mount looks fine in df.
+  sessions_dir: null
+
+  # Below this much free space, new captures are refused: at session start, at
+  # every new capture file, and with a warning on a timer in between. Refusing
+  # early is the point — a capture truncated by a full card is worse than one
+  # that never started, because you only find out afterwards.
+  #
+  # Raise it if you record long CAN sessions; a busy 500 kbit/s bus is roughly
+  # 100 MB/hour compressed.
+  min_free_mb: 256
+
+  # Compress the append-only event log. zstandard when the [compress] extra is
+  # installed, gzip otherwise. Costs a little CPU on a Pi 4 and typically saves
+  # 5-10x on event logs, which are highly repetitive.
+  compress_event_log: true
+
+# ---------------------------------------------------------------------------
+# logging
+# ---------------------------------------------------------------------------
+logging:
+  # DEBUG | INFO | WARNING | ERROR | CRITICAL.
+  # DEBUG logs every action dispatch and every frame decision. Useful when a
+  # limit rejection is not obvious; noisy enough that it will fill a journal
+  # ring on a small card if you leave it there.
+  level: INFO
+
+  # Structured JSON to stderr, which journald keeps as-is so 'journalctl -o
+  # json' gives you machine-readable events. Set false for human-readable lines
+  # when you are reading the journal directly over a slow SSH link.
+  json_output: true
+
+# ---------------------------------------------------------------------------
+# tools — external binaries
+#
+# Bare names are resolved through PATH. Give an absolute path when you have two
+# versions installed, or when the daemon's PATH is not yours (it is systemd's).
+# A tool that is absent is not an error: the actions that need it report that it
+# is missing, and everything else works.
+# ---------------------------------------------------------------------------
+tools:
+  sigrok_cli: sigrok-cli    # logic analyzer capture
+  openocd: openocd          # SWD/JTAG
+  pyocd: pyocd              # CMSIS-DAP / J-Link, when installed via pip
+  esptool: esptool.py       # ESP32/ESP8266
+  avrdude: avrdude          # AVR
+  dfu_util: dfu-util        # USB DFU
+  picotool: picotool        # RP2040 in BOOTSEL
+  ip: ip                    # reads CAN link state; never brings a link up
+  candump: candump          # from can-utils, for cross-checking a capture
+  tcpdump: tcpdump          # packet capture; needs CAP_NET_RAW, see the unit
+  v4l2_ctl: v4l2-ctl        # camera enumeration
+
+# ---------------------------------------------------------------------------
+# camera — evidence photos attached to a session
+# ---------------------------------------------------------------------------
+camera:
+  enabled: true
+
+  # Null means "pick the first V4L2 device". Name one (e.g. /dev/video0) when
+  # the Pi has both a CSI camera and a USB scope camera attached and you care
+  # which is which.
+  default_device: null
+  width: 1280
+  height: 720
+
+  # Must be false. Images stay on the device and are attached to the session;
+  # sending one anywhere is an explicit operator action, every time. The model
+  # rejects true outright rather than honouring it — a field device that uploads
+  # pictures of a customer's hardware by itself is not a defensible default.
+  auto_upload: false
+
+# ---------------------------------------------------------------------------
+# remote — optional localhost HTTP/WebSocket surface
+# ---------------------------------------------------------------------------
+remote:
+  # Off. The control socket is a Unix socket with group permissions, and that is
+  # the whole access model. Turn this on only for a deliberate integration.
+  enabled: false
+
+  # Refuses 0.0.0.0, :: and *. Binding a hardware control API to every interface
+  # is not a configuration mistake this file will let you make; put it behind an
+  # SSH tunnel or a VPN and bind to the tunnel's address.
+  bind: 127.0.0.1
+  port: 8787
+
+# ---------------------------------------------------------------------------
+# serial_presets — what the serial picker offers
+#
+# 'electrical' is recorded, never inferred, and never treated as equivalent:
+# TTL, RS-232 and RS-485 are different voltages and different topologies.
+# Plugging a 3.3 V TTL adapter into an RS-232 port damages one of them, and
+# FieldDeck will not paper over the difference by guessing.
+# ---------------------------------------------------------------------------
+serial_presets:
+  - name: 115200 8N1 TTL
+    baudrate: 115200
+    bytesize: 8
+    parity: N          # N | E | O
+    stopbits: 1
+    electrical: ttl    # ttl | rs232 | rs485 | unknown
+
+  - name: 9600 8N1 RS485
+    baudrate: 9600
+    electrical: rs485
+
+  - name: 19200 8E1 Modbus RTU
+    baudrate: 19200
+    parity: E
+    electrical: rs485
+
+# ---------------------------------------------------------------------------
+# can_presets — bitrates offered in the CAN picker
+#
+# listen_only is true on every preset, and should stay that way. FieldDeck never
+# transmits to detect a bitrate: a wrong guess at the wrong moment puts error
+# frames on a live vehicle bus. Selecting a preset does not configure the
+# interface either — bringing a CAN link up is a deliberate root action:
+#     sudo ip link set can0 up type can bitrate 500000 listen-only on
+# ---------------------------------------------------------------------------
+can_presets:
+  - name: 125k
+    bitrate: 125000
+    listen_only: true
+  - name: 250k
+    bitrate: 250000
+    listen_only: true
+  - name: 500k
+    bitrate: 500000
+    listen_only: true
+  - name: 1M
+    bitrate: 1000000
+    listen_only: true
+  # CAN FD: 500 kbit/s arbitration, 2 Mbit/s data.
+  - name: 500k/2M FD
+    bitrate: 500000
+    data_bitrate: 2000000
+    fd: true
+    listen_only: true
+
+# ---------------------------------------------------------------------------
+# aliases — a name for a device that will not change under you
+#
+# Device ids are derived from stable identity (USB serial number, interface
+# name) rather than from /dev/ttyUSB0, which is just enumeration order. An alias
+# is how a recipe refers to "the bench supply" without caring which port it came
+# up on this morning. Look up the real ids with:  fdctl devices
+# ---------------------------------------------------------------------------
+aliases: []
+# aliases:
+#   - alias: bench-psu
+#     device_id: bench:usbtmc:rigol-dp832-DP8A1234567890
+#     note: Rigol DP832, left rack position, feeds the DUT's 12 V rail
+#   - alias: dut-uart
+#     device_id: serial:usb:0403-6001-AB0KXYZ1
+#     note: FTDI on the console header. TTL 3.3 V — not RS-232.
+
+# ---------------------------------------------------------------------------
+# Recorded on every session, so a capture can be traced back to a person.
+# ---------------------------------------------------------------------------
+operator: null
+
+# Swap every driver for its simulated counterpart: a supply, a DMM, a CAN bus
+# and a serial port that behave plausibly and are attached to nothing. Leave
+# this false on a real unit and use the environment variable for a one-off, so
+# there is no way to leave a bench in simulation by accident:
+#     FIELDDECK_SIM=1 instrumentd
+simulate: false

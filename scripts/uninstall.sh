@@ -189,7 +189,11 @@ run_ok rm -f "$PREFIX/requirements.lock"
 run_ok rm -f "$PREFIX/src"
 # Only if it is now empty: --prefix may be a directory that predates FieldDeck.
 if [[ -d "$PREFIX" ]] && (( ! DRY_RUN )); then
-  rmdir "$PREFIX" 2>/dev/null && ok "$PREFIX removed (it was empty)" || note "$PREFIX kept: not empty"
+  if rmdir "$PREFIX" 2>/dev/null; then
+    ok "$PREFIX removed (it was empty)"
+  else
+    note "$PREFIX kept: it still has files FieldDeck did not put there"
+  fi
 fi
 for cmd in fdctl instrumentd fielddeck-ui fielddeck-mcp fielddeck-preflight fielddeck-session; do
   run_ok rm -f "$BIN_DIR/$cmd"

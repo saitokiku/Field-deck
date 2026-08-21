@@ -1,0 +1,69 @@
+# FieldDeck — panel (HMI) configuration.
+#
+# ===========================================================================
+#   STATUS: RESERVED. NOTHING READS THIS FILE YET.
+#
+#   fielddeck.common.paths.Paths reserves the name /etc/fielddeck/ui.yaml, but
+#   no loader opens it and there is no pydantic model behind it. Every key
+#   below is a proposal, not a setting.
+#
+#   For that reason scripts/install.sh deliberately does NOT copy this file to
+#   /etc/fielddeck/ui.yaml. A configuration file that sits in /etc and silently
+#   does nothing reads as a promise the software has not made — you would tune
+#   it, restart, see no change, and go looking for the bug somewhere real.
+#
+#   THE PANEL SETTINGS THAT DO WORK TODAY are in fielddeck.yaml, under
+#   'display:' — columns, rows, width_px, height_px, min_touch_cols,
+#   min_touch_rows, monochrome. Edit those.
+#
+#   This file exists so that whoever adds a UIConfig model has the intended
+#   shape and the reasoning behind it in one place, rather than inventing both
+#   under deadline.
+# ===========================================================================
+#
+# ---------------------------------------------------------------------------
+# Proposed shape
+# ---------------------------------------------------------------------------
+#
+# # Which screen the panel opens on after a boot or a restart. HOME is the
+# # right default: it is the only screen that shows the safety banner, the
+# # session and the device count at once, and a panel that resumes wherever it
+# # was left is a panel that can come up mid-workflow with no context.
+# start_screen: home        # home | discovery | bench | can | serial | session
+#
+# # Seconds of no touch before the panel returns to HOME. Not a screen blank —
+# # the display never blanks — just a return to the screen with the banner on
+# # it, so an abandoned panel does not sit on a control screen. 0 disables.
+# idle_return_s: 120
+#
+# # How often the panel re-reads safety state and device status from the
+# # daemon. Faster feels more alive and costs Pi CPU that a busy capture wants.
+# # ESTOP and arm changes arrive as events regardless of this interval; it only
+# # governs the periodic refresh of things nobody pushed.
+# refresh_interval_s: 1.0
+#
+# # Confirmation before arming. FieldDeck's model is that the ARM tap IS the
+# # confirmation, and a second "are you sure" trains people to tap twice
+# # without reading. Present here only because some sites' procedures require
+# # a double-acknowledge, and doing it in the panel beats doing it on paper.
+# confirm_arm: false
+#
+# # Never make E-STOP confirm. Stopping is never the dangerous direction, and a
+# # confirmation dialog between an operator and the stop button is a defect.
+# # If a key ever appears here to gate it, the answer is no.
+#
+# # Tile layout on HOME, in order. Fewer, larger tiles for gloved hands.
+# home_tiles:
+#   - devices
+#   - arm
+#   - session
+#   - can
+#   - serial
+#   - bench
+#
+# # Panel-side theme. 'auto' follows display.monochrome in fielddeck.yaml.
+# theme: auto               # auto | colour | monochrome | high-contrast
+#
+# # Show the simulated-hardware marker in the chrome. There is no way to turn
+# # it off: a panel that can be in simulation without saying so is a panel that
+# # will eventually be trusted while attached to nothing.

@@ -1,0 +1,212 @@
+# ===========================================================================
+#
+#   F I E L D D E C K   S A F E T Y   P O L I C Y
+#
+#   Installed as /etc/fielddeck/safety.yaml
+#
+#   THESE ARE HARD LIMITS. They are not defaults, not suggestions and not
+#   warnings. Every value below is checked by the daemon before a command
+#   reaches hardware, and a request that exceeds one is refused outright —
+#   nothing is sent to the device and the request is recorded as refused.
+#
+#   RAISING A LIMIT IS A DELIBERATE ACT. It is an edit to a root-owned file on
+#   a machine you had to be root to reach, and it should be reviewed the same
+#   way you would review a change to a test fixture that sits across someone
+#   else's hardware. If you are raising a limit to make an error message go
+#   away, stop: the error message is the feature.
+#
+#   AN INVALID FILE STOPS THE DAEMON. If this file exists and does not parse —
+#   bad YAML, an unknown key, a value of the wrong type — instrumentd REFUSES
+#   TO START and says which field. It does not fall back to defaults and it
+#   does not start with the parts it understood. A safety policy that is
+#   silently ignored is worse than no safety policy at all, because you would
+#   go on believing you had one.
+#
+#       journalctl -u instrumentd -n 20     # tells you exactly what is wrong
+#       fdctl limits                        # what the running daemon loaded
+#
+#   Deleting this file is legal and safe: FieldDeck then uses its built-in
+#   conservative defaults, which are the values commented as "built-in" below.
+#
+#   YOU CAN ONLY TIGHTEN. For any quantity that FieldDeck ships a built-in
+#   limit for, this file is intersected with that built-in and the stricter
+#   bound wins. Writing "maximum: 60.0" for psu.voltage does not give you 60 V;
+#   it leaves you at the built-in 30 V. Going beyond a built-in ceiling is a
+#   source change (DEFAULT_GLOBAL_LIMITS in fielddeck/common/config.py) and a
+#   redeploy — which is the intended amount of friction for saying "this bench
+#   routinely runs at 60 V".
+#
+#   Everything here is optional. Every key you leave out keeps its built-in.
+#
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# global_limits — bounds on physical quantities, applied to every device
+#
+# The key and the 'quantity' field must match. The repetition is not
+# decorative: the model requires 'quantity' on the limit itself, so a limit
+# stays self-describing wherever it is quoted — in an error message, in a
+# session record, in 'fdctl limits' output — rather than only making sense in
+# the context of the mapping it was read from.
+#
+# unit is a label used in messages; it does not convert anything. Write the
+# value in the unit the action takes.
+#
+# WHICH QUANTITIES EXIST. These are checked because an action declares them:
+#
+#   psu.voltage        psu.set voltage setpoint                     V
+#   psu.current        psu.set current limit                        A
+#   psu.power          derived: voltage x current_limit             W
+#   load.current       load.set in constant-current mode            A
+#   load.power         load.set in constant-power mode              W
+#   load.resistance    load.set in constant-resistance mode         ohm
+#   gpio.voltage       GPIO/level-shifter output level              V
+#
+# A quantity with no entry here and no built-in is UNBOUNDED. load.resistance
+# is exactly that case: it is limit-checked by the load driver but FieldDeck
+# ships no built-in for it, so if you use constant-resistance mode, set one.
+# ---------------------------------------------------------------------------
+global_limits:
+
+  psu.voltage:
+    quantity: psu.voltage
+    minimum: 0.0
+    maximum: 24.0        # built-in: 30.0
+    unit: V
+    # 'note' is shown to the operator when the limit refuses a request, so
+    # write the reason, not the rule. "24 V max" tells them nothing they cannot
+    # see; this tells them who to ask.
+    note: DUT is a 24 V system. Above this you are testing the harness, not the unit.
+
+  psu.current:
+    quantity: psu.current
+    minimum: 0.0
+    maximum: 2.0         # built-in: 3.0
+    unit: A
+    note: Bench supply feeds through 20 AWG flying leads rated 2 A.
+
+  psu.power:
+    quantity: psu.power
+    minimum: 0.0
+    maximum: 48.0        # built-in: 90.0
+    unit: W
+    # This one is derived: the daemon multiplies the requested voltage by the
+    # requested current limit and checks the product. It catches the case where
+    # 24 V and 2 A are each individually allowed and together are more than the
+    # DUT's connector can dissipate.
+    note: Product of setpoint and current limit. Connector is the weak point.
+
+  load.current:
+    quantity: load.current
+    minimum: 0.0
+    maximum: 2.0         # built-in: 3.0
+    unit: A
+    note: Do not pull the DUT below its brown-out threshold during a test.
+
+  load.power:
+    quantity: load.power
+    minimum: 0.0
+    maximum: 48.0        # built-in: 90.0
+    unit: W
+
+  load.resistance:
+    quantity: load.resistance
+    minimum: 0.5         # no built-in exists; without this entry it is unbounded
+    maximum: 1000.0
+    unit: ohm
+    note: Below 0.5 ohm the load looks like a short to the DUT's protection.
+
+  gpio.voltage:
+    quantity: gpio.voltage
+    minimum: 0.0
+    maximum: 3.3         # built-in: 3.3
+    unit: V
+    note: Pi GPIO is 3.3 V. 5 V on a pin kills the SoC, not just the pin.
+
+# ---------------------------------------------------------------------------
+# max_arm_ttl_s — how long an arm grant of each class may live
+#
+# Authorization in FieldDeck expires. An operator arms a permission class for a
+# bounded time and it lapses on its own, because the failure mode that actually
+# happens in the field is not someone arming something they should not — it is
+# someone arming something correctly and then walking away.
+#
+# Authorization is also EXACT-CLASS: a POWER grant does not authorize a CONTROL
+# action. There is no hierarchy to inherit through, so each class gets its own
+# ceiling, chosen for how bad it is to have that class live and unattended.
+#
+# Shorter is safer. Re-arming is one command and one tap.
+# ---------------------------------------------------------------------------
+max_arm_ttl_s:
+  QUERY: 900.0        # built-in 900. Reads and *IDN?; the mildest thing that
+                      # still talks to a DUT.
+  CONTROL: 600.0      # built-in 600. Transmitting on a bus, driving a line.
+  POWER: 180.0        # built-in 300. Energising something. Three minutes is
+                      # about as long as a person stays at one bench.
+  FLASH: 900.0        # built-in 900. Long because a flash cycle is long, and a
+                      # grant expiring mid-write is its own hazard.
+  DESTRUCTIVE: 60.0   # built-in 120. Erase, fuse-blow, anything unrecoverable.
+                      # If it takes more than a minute to decide, decide again.
+
+# The TTL used when an operator does not pass one. Deliberately short: the
+# common case should be the safe case, and 'fdctl arm power --ttl 300' is
+# available when someone genuinely needs longer.
+default_arm_ttl_s: 60.0
+
+# The dead-man interval for a sustained output. A held output — a supply that
+# is on, a signal being driven — needs its lease renewed this often or the
+# daemon drives that device to its safe state. This is what makes a client
+# crash, an SSH drop or a panel freeze turn the output OFF rather than leaving
+# it up with nothing watching it.
+#
+# Raise it and you widen the window in which a dead client leaves hardware
+# energised. Lower it and a busy Pi may fail to renew in time during a heavy
+# capture, dropping an output mid-test.
+default_lease_ttl_s: 30.0
+
+# ---------------------------------------------------------------------------
+# denied_permissions — classes this unit refuses outright
+#
+# Not "requires extra confirmation": refused. An action in a denied class
+# cannot be armed at all, by anyone, from any client. This is how a shop keeps
+# a field unit that can diagnose but can never erase a customer's firmware.
+#
+# Names are exact: QUERY, CONTROL, POWER, FLASH, DESTRUCTIVE. (PASSIVE cannot
+# be denied — it is the boot state and covers listening and enumeration, which
+# transmit nothing.)
+# ---------------------------------------------------------------------------
+denied_permissions: []
+# A diagnostics-only field unit:
+# denied_permissions:
+#   - DESTRUCTIVE
+#   - FLASH
+
+# ---------------------------------------------------------------------------
+# estop_requires_ack
+#
+# After an emergency stop, nothing can be re-armed until a human explicitly
+# acknowledges it (fdctl estop clear, or the panel's own confirmation). Leave
+# this true. Setting it false means the next armed action can follow an E-STOP
+# without anybody having looked at the bench, which defeats the point of having
+# stopped.
+# ---------------------------------------------------------------------------
+estop_requires_ack: true
+
+# ---------------------------------------------------------------------------
+# device_limits — per-device overrides, keyed by device id or alias
+#
+# Combined with the global limit, stricter bound wins. Use this for the one
+# supply on the bench that is wired to something fragile, without dropping the
+# ceiling for every other device.
+#
+# Get the ids from:  fdctl devices
+# ---------------------------------------------------------------------------
+device_limits: {}
+# device_limits:
+#   bench-psu:                      # an alias from fielddeck.yaml works here
+#     psu.voltage:
+#       quantity: psu.voltage
+#       minimum: 0.0
+#       maximum: 5.5
+#       unit: V
+#       note: Wired to the 5 V logic rail on the DUT. 12 V destroys the board.

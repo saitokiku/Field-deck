@@ -1,0 +1,105 @@
+#!/bin/sh
+#
+# FieldDeck .xinitrc — installed as /etc/fielddeck/xinitrc.
+#
+# The entire X session: turn off everything that could blank, dim or decorate
+# the panel, then run one terminal. No window manager, no compositor, no panel,
+# no notification daemon, no wallpaper. If a process is not on this page, it is
+# not running on the display.
+#
+# Written in POSIX sh, not bash: xinit execs this with /bin/sh and a field
+# device is not the place to discover that /bin/sh is dash.
+#
+# Started by scripts/fielddeck-kiosk.sh via:
+#     xinit /etc/fielddeck/xinitrc -- :0 vt1 -keeptty -nolisten tcp
+
+# ---------------------------------------------------------------------------
+# Screen behaviour
+#
+# A screensaver on an instrument panel is a fault. An operator glancing at the
+# bench to check a supply is still off must see the supply, not a black screen
+# they have to touch — and touching a panel to wake it is exactly the input
+# nobody wants near an ARM button.
+# ---------------------------------------------------------------------------
+
+xset s off          # no screensaver
+xset s noblank      # ...and no blanking either, which is a separate setting
+xset -dpms          # no power management: never turn the backlight off
+
+# No pointer acceleration. Resistive panels report absolute positions, and
+# acceleration on an absolute device makes taps land somewhere near where you
+# meant. This matters more than it sounds: the ARM tile is 15 columns wide.
+xset m 0 0
+
+# Repeat rate for the occasional USB keyboard: slow enough that a held key does
+# not run away on a laggy SPI panel.
+xset r rate 400 25
+
+# Black root window rather than the default X stipple, which looks like a fault.
+if command -v xsetroot >/dev/null 2>&1; then
+    xsetroot -solid black
+    xsetroot -cursor_name left_ptr
+fi
+
+# ---------------------------------------------------------------------------
+# Touch input
+#
+# Calibration lives in /etc/X11/xorg.conf.d/10-fielddeck-touch.conf, where it
+# survives restarts. This block only reports what X actually bound, because
+# "the touch is 90 degrees out" and "there is no touch device at all" look
+# identical on a black screen.
+# ---------------------------------------------------------------------------
+
+if command -v xinput >/dev/null 2>&1; then
+    echo "fielddeck-xinitrc: input devices X sees:"
+    xinput list --short 2>/dev/null | sed 's/^/  /'
+fi
+
+# ---------------------------------------------------------------------------
+# The terminal
+#
+# 80x25 at 6x12 px is 480x300 — the panel is 480x320, so the layout lands
+# exactly and the spare 20 px stay black. That is where the HMI's 80x25 comes
+# from; change the font and you change the console, not just its looks.
+#
+# There is no window manager, so this window is unmanaged: X places it at +0+0
+# at the size we ask for and nothing can move, resize or cover it.
+# ---------------------------------------------------------------------------
+
+TERMINAL_CMD="fielddeck-session"
+command -v "$TERMINAL_CMD" >/dev/null 2>&1 || \
+    TERMINAL_CMD="/usr/local/lib/fielddeck/fielddeck-session.sh"
+
+if command -v xterm >/dev/null 2>&1; then
+    # -fn 6x12       the bitmap font from xfonts-base. If it is missing, xterm
+    #                falls back to a larger font and the HMI is cut off; install
+    #                xfonts-base rather than changing the geometry.
+    # -geometry      80x25 at the top-left corner.
+    # -b 0 -bw 0     no inner margin, no window border: every pixel is content.
+    # +sb            no scrollbar; tmux owns scrollback and the bar would eat
+    #                two of the 80 columns.
+    # -bg/-fg        high contrast for a washed-out resistive panel.
+    # +cm            do not interpret colour-change escapes from a DUT's output.
+    exec xterm \
+        -fn 6x12 \
+        -geometry 80x25+0+0 \
+        -b 0 -bw 0 +sb \
+        -bg black -fg white -cr green \
+        +cm \
+        -title FieldDeck \
+        -e "$TERMINAL_CMD"
+fi
+
+# Debian's terminal alternative, for an image without xterm.
+if command -v x-terminal-emulator >/dev/null 2>&1; then
+    exec x-terminal-emulator -e "$TERMINAL_CMD"
+fi
+
+# Nothing to run X for. Say so on the panel itself rather than exiting into a
+# black screen, and hold the session open so the message can be read.
+if command -v xmessage >/dev/null 2>&1; then
+    xmessage -center "FieldDeck: no terminal emulator installed (apt install xterm)"
+else
+    echo "fielddeck-xinitrc: no terminal emulator found; install xterm" >&2
+    sleep 30
+fi
