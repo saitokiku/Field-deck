@@ -349,6 +349,18 @@ class Driver(ABC):
 
         The default is a no-op for devices with no outputs.  Anything that can
         energise, drive or transmit **must** override this.
+
+        **How to report failure.**  ``applied`` answers *"did I change
+        anything"* -- it is ``False`` for a DMM, which has nothing to change and
+        is perfectly safe.  It does **not** mean the device is dangerous.  To
+        say that the device could not be made safe, either raise or return an
+        ``error`` key; the dispatcher then records the device as live, at
+        CRITICAL, and the emergency stop reply names it.
+
+        The distinction matters because both a fine DMM and a supply whose
+        safe_state failed would otherwise report ``applied: False``, which makes
+        the DMM look dangerous and -- much worse -- makes the live supply look
+        ordinary.
         """
         return {"device": self.device_id, "applied": False, "reason": "no outputs"}
 

@@ -496,11 +496,19 @@ class InstrumentDaemon:
         results = await self.dispatcher.apply_safe_state(reason=f"ESTOP: {reason}")
         if self.sessions.recorder is not None:
             self.sessions.recorder.flush()
+        # Surfaced at the top level rather than left in the per-device list: a
+        # client that has to scan for `safe: false` to find out the bench is
+        # not safe will eventually not scan.
+        unsafe = [
+            str(outcome.get("device")) for outcome in results if not outcome.get("safe", False)
+        ]
         return {
             "estop": True,
             "reason": reason,
             "surrendered_leases": [lease.lease_id for lease in leases],
             "safe_state": results,
+            "all_devices_safe": not unsafe,
+            "devices_not_safed": unsafe,
             "evidence": "all captured data and session metadata preserved",
         }
 

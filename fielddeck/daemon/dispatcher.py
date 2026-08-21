@@ -711,8 +711,17 @@ class Dispatcher:
             )
 
         async def safe_one(driver: Driver) -> dict[str, Any]:
+            # ``applied`` answers "did I change anything", which is not the same
+            # question as "is this device safe now". A DMM reports
+            # ``applied: False, reason: "no outputs"`` and is entirely fine; a
+            # supply whose safe_state raised also reports ``applied: False`` and
+            # is live. Reading the two the same way would have made the DMM look
+            # dangerous and, far worse, made the supply look ordinary.
+            #
+            # So the dispatcher records its own verdict: safe unless the driver
+            # raised, timed out, or said so itself by returning an ``error``.
             try:
-                return await asyncio.wait_for(driver.safe_state(), timeout=SAFE_STATE_TIMEOUT_S)
+                outcome = await asyncio.wait_for(driver.safe_state(), timeout=SAFE_STATE_TIMEOUT_S)
             except TimeoutError:
                 _log.error(
                     "safe state timed out",
@@ -721,6 +730,7 @@ class Dispatcher:
                 return {
                     "device": driver.device_id,
                     "applied": False,
+                    "safe": False,
                     "error": f"safe_state did not return within {SAFE_STATE_TIMEOUT_S:g}s",
                 }
             except Exception as exc:  # noqa: BLE001 - one bad driver must not stop the rest
@@ -728,18 +738,41 @@ class Dispatcher:
                     "safe state failed",
                     extra={"device": driver.device_id, "error": str(exc)},
                 )
-                return {"device": driver.device_id, "applied": False, "error": str(exc)}
+                return {
+                    "device": driver.device_id,
+                    "applied": False,
+                    "safe": False,
+                    "error": str(exc),
+                }
+            outcome = dict(outcome or {})
+            outcome.setdefault("device", driver.device_id)
+            outcome["safe"] = not outcome.get("error")
+            return outcome
 
         results = await asyncio.gather(*(safe_one(driver) for driver in drivers))
         for driver, outcome in zip(drivers, results, strict=True):
+            # The timeline must not claim a device was made safe when it was
+            # not. An operator reading back an emergency stop is asking exactly
+            # one question of these lines, and "safe state applied to bench-psu"
+            # under a supply whose safe_state timed out answers it wrongly --
+            # which is worse than not logging at all.
+            safe = bool(outcome.get("safe", False))
             self.bus.publish(
                 new_event(
                     EventType.SAFE_STATE_APPLIED,
-                    severity=EventSeverity.WARNING,
+                    severity=EventSeverity.WARNING if safe else EventSeverity.CRITICAL,
                     session_id=self.sessions.current_id,
                     device_id=driver.device_id,
-                    message=f"safe state applied to {driver.device_id}: {reason}",
-                    payload={"reason": reason, "outcome": outcome},
+                    message=(
+                        f"safe state applied to {driver.device_id}: {reason}"
+                        if safe
+                        else (
+                            f"SAFE STATE FAILED on {driver.device_id}: "
+                            f"{outcome.get('error') or 'the driver reported it did not apply'} "
+                            f"({reason}) — treat this device as live"
+                        )
+                    ),
+                    payload={"reason": reason, "outcome": outcome, "safe": safe},
                 )
             )
         return list(results)

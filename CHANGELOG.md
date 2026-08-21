@@ -109,6 +109,14 @@ where the sharp edges are:
   Planners now refuse what they cannot do, and `DebugActions._execute` refuses
   any plan more dangerous than the permission the dispatcher granted — so the
   same bug in a future tool wrapper fails closed.
+- **A safe state that failed was recorded as "safe state applied".** The
+  timeline showed *"safe state applied to bench-psu"* at WARNING for a supply
+  whose `safe_state()` had just timed out or raised. Failures are now CRITICAL,
+  say *"treat this device as live"*, and the emergency-stop reply carries
+  `all_devices_safe` and `devices_not_safed` at the top level rather than
+  leaving a client to scan a list. The same change untangled `applied: False`,
+  which meant both "I failed" and "a DMM has no outputs" — reading those the
+  same way made the DMM look dangerous and the live supply look ordinary.
 - **An in-flight action could undo a safe state that overtook it.** A slow
   `psu.output(enabled=True)` that was authorized before an emergency stop
   finished after it, and turned the rail back on. The stop reported success,
