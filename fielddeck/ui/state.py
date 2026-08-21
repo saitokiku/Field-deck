@@ -67,6 +67,7 @@ __all__ = [
     "SessionView",
     "SystemView",
     "UiState",
+    "parse_payload",
 ]
 
 #: ``safety.status`` is an RPC method, not an action, so it leaves no trace on
@@ -222,6 +223,28 @@ class FaultView:
 
     def age_s(self) -> float:
         return max(0.0, (monotonic_ns() - self.monotonic_ns) / 1e9)
+
+
+def parse_payload(text: str, *, as_hex: bool) -> tuple[bytes | None, str]:
+    """Turn what the operator typed into the bytes that will go on the wire.
+
+    Returns ``(None, reason)`` rather than guessing.  ``55 AA`` is two bytes in
+    hex and five characters as text, and a panel that quietly picked one of
+    those readings would eventually pick the wrong one while somebody watched a
+    motor instead of the screen.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return None, "nothing to send"
+    if not as_hex:
+        return stripped.encode("utf-8"), ""
+    cleaned = stripped.replace(" ", "").replace(",", "").replace("0x", "").replace("_", "")
+    if len(cleaned) % 2:
+        return None, f"{len(cleaned)} hex digits is not a whole number of bytes"
+    try:
+        return bytes.fromhex(cleaned), ""
+    except ValueError:
+        return None, f"{stripped!r} is not hex; switch the view to ASCII to send it as text"
 
 
 # ---------------------------------------------------------------------------
@@ -547,6 +570,39 @@ class UiState:
 
     async def note(self, text: str) -> Outcome:
         return await self.run("session.note", {"text": text})
+
+    async def send_serial(
+        self,
+        device_id: str,
+        payload: str,
+        *,
+        as_hex: bool,
+        append_newline: bool = False,
+    ) -> Outcome:
+        """Transmit to a DUT.  Malformed input is refused here, before the wire.
+
+        A rejected payload never reaches ``instrumentd``: the daemon would
+        refuse it too, but a round trip that ends in "not hex" reads to an
+        operator like the port failed rather than the typing did.
+        """
+        data, problem = parse_payload(payload, as_hex=as_hex)
+        if data is None:
+            return self._record(
+                Outcome(
+                    ok=False,
+                    action="serial.send",
+                    message=problem,
+                    code="InvalidRequest",
+                    preserved="nothing was transmitted",
+                ),
+                True,
+            )
+        params: dict[str, Any] = {"device": device_id, "append_newline": append_newline}
+        if as_hex:
+            params["hex"] = data.hex()
+        else:
+            params["text"] = data.decode("utf-8", errors="replace")
+        return await self.run("serial.send", params)
 
     # -- power output ------------------------------------------------------
 
