@@ -86,7 +86,19 @@ class SafetyManager:
                 preserved="no command was sent to the device",
             )
 
-        if self.estop_controller.active and not allowed_during_estop:
+        # A latched stop is waived only for an action that both declares itself
+        # safe during one *and* resolves to PASSIVE for these parameters.
+        #
+        # Both halves are load-bearing. `psu.output` declares the flag so that
+        # DISABLING a rail survives a latched stop -- but the flag lives on the
+        # ActionSpec, so consulting it alone would waive the latch for ENABLING
+        # too, and a POWER grant issued under a permissive `estop_requires_ack`
+        # policy would then energise the rail with the stop still engaged.
+        # The resolver already reports `psu.output(enabled=False)` as PASSIVE;
+        # requiring that here is what keeps "you can always make it safer" from
+        # also meaning "you can make it live again".
+        estop_waived = allowed_during_estop and permission is PermissionLevel.PASSIVE
+        if self.estop_controller.active and not estop_waived:
             status = self.estop_controller.status
             self._deny(
                 action,

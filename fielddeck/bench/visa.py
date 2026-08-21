@@ -1178,7 +1178,10 @@ class BenchInstrumentDriver(Driver):
         params=ChannelParams,
         state_changing=False,
         description="Read output voltage and current from the instrument.",
-        allowed_during_estop=True,
+        # Not allowed_during_estop: this sends SCPI, and a latched stop is
+        # only ever waived for PASSIVE work. The question it answers -- what
+        # is the rail actually doing -- is served during a stop by the
+        # PASSIVE status action and by the SAFE_STATE_APPLIED event payload.
         timeout_s=15.0,
     )
     async def psu_measure(self, ctx: ActionContext, params: ChannelParams) -> dict[str, Any]:
@@ -1379,7 +1382,10 @@ class BenchInstrumentDriver(Driver):
         params=DeviceParams,
         state_changing=False,
         description="Read the load's terminal voltage, current and power.",
-        allowed_during_estop=True,
+        # Not allowed_during_estop: this sends SCPI, and a latched stop is
+        # only ever waived for PASSIVE work. The question it answers -- what
+        # is the rail actually doing -- is served during a stop by the
+        # PASSIVE status action and by the SAFE_STATE_APPLIED event payload.
         timeout_s=15.0,
     )
     async def load_measure(self, ctx: ActionContext, params: DeviceParams) -> dict[str, Any]:

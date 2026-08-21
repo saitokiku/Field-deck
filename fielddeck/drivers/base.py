@@ -130,6 +130,14 @@ class ActionSpec:
     #: Limits on quantities computed from several parameters, e.g. V x I.
     derived_limit_checks: tuple[DerivedLimitCheck, ...] = ()
     #: True only for actions that move hardware *toward* safety.
+    #:
+    #: This is a *necessary* condition, not a sufficient one: the dispatcher
+    #: waives a latched emergency stop only when the flag is set **and** the
+    #: effective permission for this specific call is PASSIVE.  An action whose
+    #: declared permission is above PASSIVE therefore needs a
+    #: :attr:`permission_resolver` that narrows to PASSIVE for the parameters
+    #: that are genuinely safe during a stop -- as ``psu.output`` does for
+    #: ``enabled=False``.  Setting the flag without such a resolver is inert.
     allowed_during_estop: bool = False
     safe_state_note: str | None = None
     #: Narrows the permission for a specific call.  ``psu.output`` is POWER

@@ -134,9 +134,10 @@ def configure_logging(level: str = "INFO", *, json_output: bool | None = None) -
 
 #: Attribute names ``logging.LogRecord`` sets itself.  Passing any of these
 #: through ``extra=`` makes ``Logger.makeRecord`` raise KeyError.
-_RESERVED_RECORD_KEYS = frozenset(
-    logging.LogRecord("", 0, "", 0, "", (), None).__dict__
-) | {"message", "asctime"}
+_RESERVED_RECORD_KEYS = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {
+    "message",
+    "asctime",
+}
 
 
 class _SafeLogger(logging.Logger):
@@ -171,9 +172,7 @@ class _SafeLogger(logging.Logger):
                     (f"field_{key}" if key in collisions else key): value
                     for key, value in extra.items()
                 }
-        return super().makeRecord(
-            name, level, fn, lno, msg, args, exc_info, func, extra, sinfo
-        )
+        return super().makeRecord(name, level, fn, lno, msg, args, exc_info, func, extra, sinfo)
 
 
 logging.setLoggerClass(_SafeLogger)

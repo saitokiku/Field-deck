@@ -262,9 +262,7 @@ class GpioDriver(Driver):
                 self._request.release()
             # The request is held open so the lines stay driven; releasing it
             # is exactly what safe_state does.
-            self._request = gpiod.request_lines(
-                self.path, consumer="fielddeck", config=config
-            )
+            self._request = gpiod.request_lines(self.path, consumer="fielddeck", config=config)
             for offset, value in params.values.items():
                 self._request.set_value(
                     offset,

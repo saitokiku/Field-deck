@@ -49,6 +49,7 @@ __all__ = [
     "EPOCH_UNITS",
     "FLOAT_WIDTHS",
     "INT_WIDTHS",
+    "MAX_NUMBER_CHARS",
     "NumberParse",
     "Reading",
     "base64_decode",
@@ -140,8 +141,31 @@ class NumberParse:
     explicit: bool
 
 
+#: Longest numeric literal ``tools.convert`` will parse.
+#:
+#: CPython caps int-to-str and str-to-int conversion at 4300 digits by default,
+#: and past that limit ``int(text)`` raises ValueError from deep inside the
+#: parse -- so a PASSIVE action handed a long string answers "internal error"
+#: instead of refusing it. Bounding the input turns that into one typed
+#: refusal at the edge.
+#:
+#: The bound is on *input* characters but the limit applies to the *decimal*
+#: rendering, and an all-hex-digit input is also read as hexadecimal: N hex
+#: digits render as about N x 1.21 decimal digits. 2048 leaves ample headroom
+#: (about 2466 decimal digits) while still being far larger than any real
+#: register dump -- 2048 hex digits is an 8192-bit number.
+MAX_NUMBER_CHARS = 2048
+
+
 def _clean_number(text: str) -> str:
-    return text.strip().replace("_", "").replace(" ", "")
+    cleaned = text.strip().replace("_", "").replace(" ", "")
+    if len(cleaned) > MAX_NUMBER_CHARS:
+        raise InvalidRequest(
+            f"number is {len(cleaned)} characters; the limit is {MAX_NUMBER_CHARS}",
+            details={"length": len(cleaned), "limit": MAX_NUMBER_CHARS},
+            preserved="nothing was parsed",
+        )
+    return cleaned
 
 
 def parse_number(text: str, *, base: int | None = None) -> int:
@@ -627,7 +651,18 @@ _PLAUSIBLE_EPOCH_S = (946_684_800, 4_102_444_800)  # 2000-01-01 .. 2100-01-01
 def guess_epoch_units(value: int) -> list[str]:
     """Which epoch units would make ``value`` a plausible date?"""
     low, high = _PLAUSIBLE_EPOCH_S
-    return [unit for unit, scale in EPOCH_UNITS.items() if low <= value * scale / 1e9 <= high]
+    if value < 0:
+        return []
+    # Compare in integer nanoseconds. The obvious `value * scale / 1e9` raises
+    # OverflowError converting a large int to float, and this is reached from
+    # tools.convert -- a PASSIVE action that a client may hand any string at
+    # all. An arbitrarily long register dump must produce "not a timestamp",
+    # never "internal error".
+    return [
+        unit
+        for unit, scale in EPOCH_UNITS.items()
+        if low * 1_000_000_000 <= value * scale <= high * 1_000_000_000
+    ]
 
 
 # ---------------------------------------------------------------------------
