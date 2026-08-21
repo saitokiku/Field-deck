@@ -1,0 +1,15 @@
+# Asks for a voltage the deployment's ceiling forbids. The compiler must refuse
+# this before the first step runs, not partway through with the rail energised.
+version: 1
+name: over-limit
+description: A setpoint outside the global safety ceiling.
+
+requires:
+  devices:
+    - role: psu
+
+steps:
+  - action: psu.set
+    device: role:psu
+    voltage: 60.0
+    current_limit: 2.0

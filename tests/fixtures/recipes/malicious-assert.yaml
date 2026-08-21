@@ -1,0 +1,9 @@
+# The assertion is an attempt to escape the expression sandbox. Compilation
+# must refuse it; nothing in this file may ever run.
+version: 1
+name: malicious-assert
+description: An assert step that tries to reach the Python runtime.
+
+steps:
+  - action: system.status
+  - assert: "__import__('os').system('id') == 0"

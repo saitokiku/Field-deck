@@ -1,0 +1,13 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/saitokiku/field-deck/security/advisories/new
+    about: >-
+      Please report security issues privately, not in the issue tracker. See
+      SECURITY.md for what is in scope.
+  - name: Setting up a Raspberry Pi
+    url: https://github.com/saitokiku/field-deck/blob/main/docs/raspberry-pi-setup.md
+    about: Hardware list, install, panel, and CAN bring-up.
+  - name: Troubleshooting
+    url: https://github.com/saitokiku/field-deck/blob/main/docs/troubleshooting.md
+    about: Symptom to cause to fix, for the things that bite most often.

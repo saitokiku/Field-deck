@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import pytest
 
+from fielddeck.common.config import SafetyConfig
 from fielddeck.common.errors import EstopActive, PermissionDenied
 from fielddeck.common.models import ArmScope, ClientSource, PermissionLevel
 from fielddeck.common.timebase import monotonic_ns
-from fielddeck.common.config import SafetyConfig
 from fielddeck.safety.manager import SafetyManager
 
 GRANTABLE = [p for p in PermissionLevel if p.requires_grant]

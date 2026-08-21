@@ -1,0 +1,72 @@
+name: Bug report
+description: Something behaves differently from what the docs say
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing this. A badly written bug report from someone who is
+        stuck is still worth a lot more than no bug report — do not polish it.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+      placeholder: |
+        I ran `fdctl can capture can0 --seconds 30` and got 0 frames, but
+        `candump can0` in another shell shows traffic.
+    validations:
+      required: true
+
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware
+      description: >-
+        Which Pi, which adapter or HAT, which panel, and what is on the other
+        end of the wire. "It doesn't work with my CAN HAT" and "it doesn't work
+        with a Waveshare 2-CH CAN FD HAT at 250 kbit/s on a Pi 4" are different
+        bug reports, and only one can be acted on.
+      placeholder: |
+        Pi 4 4GB, Raspberry Pi OS Bookworm 64-bit Lite
+        Waveshare 2-CH CAN FD HAT (MCP2518FD), 12 MHz oscillator
+        Bus: 250 kbit/s, terminated at both ends (60 ohm measured)
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Paste the output of whichever of these you can run. Check them before
+        posting — credentials are redacted structurally, but device names and
+        session notes are yours.
+      placeholder: |
+        $ fdctl --json status
+        $ fdctl --json devices
+        $ sudo scripts/preflight.sh
+        $ journalctl -u instrumentd -n 100 --no-pager
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`fdctl --version`, or the commit."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: simulated
+    attributes:
+      label: Does it reproduce in simulation?
+      description: >-
+        Try `instrumentd --simulate`. "Haven't tried" is a fine answer.
+      options:
+        - "Yes — reproduces with --simulate"
+        - "No — only with real hardware"
+        - "Haven't tried"
+    validations:
+      required: true

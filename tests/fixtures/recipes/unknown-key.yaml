@@ -1,0 +1,6 @@
+# A typo'd top-level key. Refused rather than ignored: a silently dropped
+# section is a recipe that does not do what it says.
+version: 1
+name: unknown-key
+stepz:
+  - action: system.status

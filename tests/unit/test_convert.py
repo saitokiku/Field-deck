@@ -32,9 +32,9 @@ from fielddeck.analysis.convert import (
     guess_epoch_units,
     hash_bytes,
     hexdump,
+    inspect_elf,
     int_to_bytes,
     interpret,
-    inspect_elf,
     iso_to_epoch,
     list_units,
     parse_hex_bytes,
@@ -47,7 +47,6 @@ from fielddeck.analysis.convert import (
     to_base,
 )
 from fielddeck.common.errors import InvalidRequest
-
 
 # ---------------------------------------------------------------------------
 # Numbers and bases
@@ -411,7 +410,7 @@ class TestHashes:
         payload = b"123456789"
         digests = hash_bytes(payload)
         assert digests["sha256"] == hashlib.sha256(payload).hexdigest()
-        assert digests["md5"] == hashlib.md5(payload).hexdigest()  # noqa: S324
+        assert digests["md5"] == hashlib.md5(payload).hexdigest()
         assert digests["crc32"] == "0xCBF43926"
         assert digests["size_bytes"] == 9
 

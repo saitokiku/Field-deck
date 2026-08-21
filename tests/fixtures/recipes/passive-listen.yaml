@@ -1,0 +1,26 @@
+# A recipe that is PASSIVE from end to end: it listens, it records, it asserts,
+# and it never transmits. Used by the tests as the "asks for nothing" case.
+version: 1
+name: passive-listen
+description: Watch the simulated bus and confirm it is producing traffic.
+
+requires:
+  devices:
+    - id: sim:can:can0
+      note: the interface under test
+
+steps:
+  - mark: listen-start
+
+  - action: can.listen
+    device: sim:can:can0
+    duration_s: 0.2
+
+  - assert:
+      expression: "can.count > 0"
+      message: "No traffic observed on the bus"
+
+  - note: Nothing was transmitted; this pass is evidence only.
+
+finally:
+  - mark: listen-complete

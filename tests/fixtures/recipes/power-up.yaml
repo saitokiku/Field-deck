@@ -1,0 +1,39 @@
+# Reaches POWER (setting and enabling a rail) and QUERY (reading the
+# instrument). Used by the tests as the "needs two exact-class grants" case.
+version: 1
+name: power-up
+description: Energise the simulated supply, measure it, and put it back down.
+
+requires:
+  devices:
+    - role: psu
+      note: bench supply feeding the DUT
+
+limits:
+  voltage_max: 12.5
+  current_max: 1.0
+
+steps:
+  - action: psu.set
+    device: role:psu
+    voltage: 12.0
+    current_limit: 0.5
+
+  - action: psu.output
+    device: role:psu
+    enabled: true
+    lease_ttl_s: 30
+
+  - wait: 0.1
+
+  - action: psu.measure
+    device: role:psu
+
+  - assert:
+      expression: "psu.voltage > 11.0"
+      message: "The rail did not come up"
+
+finally:
+  - action: psu.output
+    device: role:psu
+    enabled: false

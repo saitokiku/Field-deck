@@ -1,0 +1,63 @@
+name: Hardware report
+description: You ran FieldDeck against real hardware — tell us what happened
+labels: [hardware-report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **This is the most valuable thing you can contribute.**
+
+        Nothing in this repository has been verified against physical hardware.
+        Every instrument profile ships `hardware_verified: false` because it is
+        a careful reading of a programming manual, not a measurement.
+
+        A report that something worked is as useful as a report that it didn't.
+
+  - type: input
+    id: device
+    attributes:
+      label: What did you connect
+      description: Make, model, and firmware version if you know it.
+      placeholder: "Rigol DP832A, firmware 00.01.16"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: How did it go
+      options:
+        - "Worked correctly"
+        - "Worked, but something was wrong or surprising"
+        - "Did not work"
+    validations:
+      required: true
+
+  - type: textarea
+    id: detail
+    attributes:
+      label: What you did and what you observed
+      description: >-
+        Which commands, and — importantly — how you verified the result.
+        "I set 5 V and measured 4.998 V with a Fluke 87" is a different claim
+        from "it reported 5 V", and both are worth having.
+      placeholder: |
+        fdctl arm power --ttl 60
+        fdctl psu set role:psu --voltage 5.0 --current-limit 0.5
+        fdctl psu output role:psu on --ttl 30 --hold 10
+
+        Measured 4.998 V at the terminals with a Fluke 87V.
+        psu.measure reported 5.001 V — within the instrument's spec.
+    validations:
+      required: true
+
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      placeholder: |
+        Pi 4 8GB, Bookworm 64-bit Lite
+        USBTMC over USB-B, no isolator
+        FieldDeck 0.1.0
+    validations:
+      required: true
