@@ -168,6 +168,11 @@ where the sharp edges are:
   section exists to say what is missing and what it costs, did not mention it.
 - **The 90° and 270° touch rotation matrices were swapped** between the
   troubleshooting guide and the shipped Xorg configuration.
+- **The panel told operators to run three commands that do not exist.** The
+  TOOLS screen's UNIT and FILE tiles printed `fdctl convert unit ...`,
+  `fdctl session artifacts` and `fdctl inspect ...`; the real forms are
+  `fdctl convert 24 --op unit`, `fdctl session show` and
+  `fdctl call tools.inspect_file`.
 - **The documented emergency-stop key did not exist.** Four documents named
   F9; the HMI bound only `ctrl+e`. F9 is now bound (and is the one shown in
   the footer, because an emergency stop advertising two keys invites a
