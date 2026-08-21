@@ -94,16 +94,12 @@ class TestResolution:
         with pytest.raises(DeviceNotFound, match="no device fills"):
             registry.resolve("role:scope")
 
-    def test_an_unknown_role_lists_the_roles_that_exist(
-        self, registry: DeviceRegistry
-    ) -> None:
+    def test_an_unknown_role_lists_the_roles_that_exist(self, registry: DeviceRegistry) -> None:
         with pytest.raises(DeviceNotFound) as caught:
             registry.resolve("role:teleporter")
         assert str(DeviceRole.PSU) in caught.value.details["roles"]
 
-    def test_an_unknown_reference_lists_what_is_known(
-        self, registry: DeviceRegistry
-    ) -> None:
+    def test_an_unknown_reference_lists_what_is_known(self, registry: DeviceRegistry) -> None:
         with pytest.raises(DeviceNotFound) as caught:
             registry.resolve("ttyUSB0")
         assert "sim:can:can0" in caught.value.details["known"]
@@ -113,9 +109,7 @@ class TestResolution:
         with pytest.raises(DeviceNotFound, match="no device specified"):
             registry.resolve("")
 
-    def test_try_resolve_swallows_only_the_not_found_case(
-        self, registry: DeviceRegistry
-    ) -> None:
+    def test_try_resolve_swallows_only_the_not_found_case(self, registry: DeviceRegistry) -> None:
         assert registry.try_resolve("nope") is None
         assert registry.try_resolve("sim:can:can0") is not None
 
@@ -134,9 +128,7 @@ class TestInventory:
         assert len(registry) == 2
         assert registry.remove("sim:can:can0") is None
 
-    def test_adding_the_same_id_twice_replaces_the_driver(
-        self, registry: DeviceRegistry
-    ) -> None:
+    def test_adding_the_same_id_twice_replaces_the_driver(self, registry: DeviceRegistry) -> None:
         """Re-discovery of the same device must not double it in the inventory."""
         replacement = FakeDriver("sim:can:can0")
         registry.add(replacement)
@@ -194,15 +186,11 @@ class TestActionLookup:
         with pytest.raises(RuntimeError, match="duplicate global action"):
             registry.register_global(specs)
 
-    def test_descriptors_can_be_narrowed_to_one_device(
-        self, registry: DeviceRegistry
-    ) -> None:
+    def test_descriptors_can_be_narrowed_to_one_device(self, registry: DeviceRegistry) -> None:
         described = registry.action_descriptors(device_id="sim:can:can0")
         assert {descriptor.device_id for descriptor in described} == {"sim:can:can0"}
 
-    def test_ready_only_hides_a_device_that_is_not_up(
-        self, registry: DeviceRegistry
-    ) -> None:
+    def test_ready_only_hides_a_device_that_is_not_up(self, registry: DeviceRegistry) -> None:
         registry.get("sim:can:can0")._set_state(ConnectionState.FAULT)
         described = registry.action_descriptors(ready_only=True)
         assert "sim:can:can0" not in {descriptor.device_id for descriptor in described}

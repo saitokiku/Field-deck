@@ -61,9 +61,7 @@ class TestLifecycle:
             sessions.start("second")
         assert caught.value.details["active_session"] == first.id
 
-    def test_stopping_closes_the_session_and_records_when(
-        self, sessions: SessionManager
-    ) -> None:
+    def test_stopping_closes_the_session_and_records_when(self, sessions: SessionManager) -> None:
         started = sessions.start("bringup")
         stopped = sessions.stop()
 
@@ -129,9 +127,7 @@ class TestLifecycle:
 
 
 class TestLayout:
-    def test_a_capture_filename_never_collides_with_an_existing_one(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_capture_filename_never_collides_with_an_existing_one(self, tmp_path: Path) -> None:
         """The mechanism that makes raw captures immutable in the first place."""
         layout = SessionLayout.create(tmp_path, "2026-08-20_bench")
 
@@ -155,9 +151,7 @@ class TestLayout:
             layout.path_for("etc", "passwd")
         assert caught.value.details["kind"] == "etc"
 
-    def test_creating_over_an_existing_session_directory_is_refused(
-        self, tmp_path: Path
-    ) -> None:
+    def test_creating_over_an_existing_session_directory_is_refused(self, tmp_path: Path) -> None:
         SessionLayout.create(tmp_path, "2026-08-20_bench")
         with pytest.raises(CaptureError, match="already exists"):
             SessionLayout.create(tmp_path, "2026-08-20_bench")
@@ -167,9 +161,7 @@ class TestLayout:
         target = layout.path_for("serial", "capture.bin")
         assert layout.relative(target) == "serial/capture.bin"
 
-    def test_the_append_log_extension_matches_the_available_codec(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_append_log_extension_matches_the_available_codec(self, tmp_path: Path) -> None:
         layout = SessionLayout.create(tmp_path, "2026-08-20_bench")
         suffix = ".zst" if compression_available() == "zstd" else ".gz"
         assert layout.events_log.name == f"events.jsonl{suffix}"
@@ -186,9 +178,7 @@ class TestAppendLog:
 
         assert [record["seq"] for record in read_append_log(path)] == [1, 2]
 
-    def test_writing_to_a_closed_log_is_an_error_not_a_silent_loss(
-        self, tmp_path: Path
-    ) -> None:
+    def test_writing_to_a_closed_log_is_an_error_not_a_silent_loss(self, tmp_path: Path) -> None:
         log = AppendLog(tmp_path / "events.jsonl", compress=False).open()
         log.close()
         with pytest.raises(CaptureError, match="closed"):
@@ -215,9 +205,7 @@ class TestRecorder:
         assert recorder is not None
         return recorder
 
-    def test_events_land_in_the_timeline_and_the_append_log(
-        self, sessions: SessionManager
-    ) -> None:
+    def test_events_land_in_the_timeline_and_the_append_log(self, sessions: SessionManager) -> None:
         recorder = self._recorder(sessions)
         recorder.on_event(new_event(EventType.MEASUREMENT, message="a reading"))
         recorder.flush()
@@ -235,9 +223,7 @@ class TestRecorder:
         # ...and it is in the queryable timeline without waiting for a batch.
         assert any(row["type"] == str(EventType.ESTOP) for row in recorder.timeline.events())
 
-    def test_an_ordinary_event_does_not_reach_the_audit_log(
-        self, sessions: SessionManager
-    ) -> None:
+    def test_an_ordinary_event_does_not_reach_the_audit_log(self, sessions: SessionManager) -> None:
         recorder = self._recorder(sessions)
         recorder.on_event(new_event(EventType.MEASUREMENT))
         recorder.flush()
@@ -251,9 +237,7 @@ class TestRecorder:
         recorder.timeline.close()  # the SQLite handle is now unusable
         recorder.on_event(new_event(EventType.MEASUREMENT, severity=EventSeverity.ERROR))
 
-    def test_marks_and_notes_are_persisted_as_they_happen(
-        self, sessions: SessionManager
-    ) -> None:
+    def test_marks_and_notes_are_persisted_as_they_happen(self, sessions: SessionManager) -> None:
         recorder = self._recorder(sessions)
         recorder.mark("power-up", source=ClientSource.HMI, note="probe on TP4")
         recorder.note("clip lead was loose")
@@ -319,9 +303,7 @@ class TestRecorder:
         assert second != first
         assert first.read_bytes() == b"first capture"
 
-    def test_the_free_space_floor_is_re_checked_at_every_capture(
-        self, paths: Paths
-    ) -> None:
+    def test_the_free_space_floor_is_re_checked_at_every_capture(self, paths: Paths) -> None:
         """A session opened on a healthy card can still be asked for a capture
         on a full one."""
         paths.ensure()
@@ -356,9 +338,7 @@ class TestReading:
         assert listed[session.id]["active"] is False
         assert listed[session.id]["ended_utc_ns"] is not None
 
-    def test_get_returns_metadata_timeline_and_artifacts(
-        self, sessions: SessionManager
-    ) -> None:
+    def test_get_returns_metadata_timeline_and_artifacts(self, sessions: SessionManager) -> None:
         session = sessions.start("readable")
         recorder = sessions.recorder
         assert recorder is not None
@@ -373,15 +353,11 @@ class TestReading:
         assert data["timeline"]["events"] >= 1
         assert [entry["relative_path"] for entry in data["artifacts"]] == ["can/can0-0001.log"]
 
-    def test_reading_an_unknown_session_is_refused_by_name(
-        self, sessions: SessionManager
-    ) -> None:
+    def test_reading_an_unknown_session_is_refused_by_name(self, sessions: SessionManager) -> None:
         with pytest.raises(SessionError, match="no such session"):
             sessions.get("2026-01-01_does-not-exist")
 
-    def test_a_session_id_cannot_escape_the_session_store(
-        self, sessions: SessionManager
-    ) -> None:
+    def test_a_session_id_cannot_escape_the_session_store(self, sessions: SessionManager) -> None:
         """The id reaches this from a client, so traversal has to be impossible."""
         with pytest.raises(SessionError):
             sessions.get("../../etc")

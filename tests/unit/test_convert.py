@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import struct
+from typing import ClassVar
 
 import pytest
 
@@ -147,7 +148,7 @@ class TestIntegers:
         assert caught.value.details["allowed"] == [8, 16, 32, 64]
 
     def test_an_unknown_endianness_is_refused(self) -> None:
-        with pytest.raises(InvalidRequest, match="big.*little"):
+        with pytest.raises(InvalidRequest, match=r"big.*little"):
             bytes_to_ints(b"\x00\x01", 16, endianness="middle")
 
 
@@ -202,7 +203,7 @@ class TestBitfields:
 class TestCobs:
     #: The worked examples from Cheshire & Baker, "Consistent Overhead Byte
     #: Stuffing" — the reference every implementation is measured against.
-    VECTORS = [
+    VECTORS: ClassVar[list[tuple[bytes, bytes]]] = [
         (b"\x00", b"\x01\x01"),
         (b"\x00\x00", b"\x01\x01\x01"),
         (b"\x11\x22\x00\x33", b"\x03\x11\x22\x02\x33"),

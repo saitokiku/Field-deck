@@ -134,9 +134,7 @@ class TestStepForms:
         assert isinstance(step.steps[0], WaitStep)
 
     def test_finally_is_spelled_the_yaml_way(self) -> None:
-        recipe = parse(
-            "version: 1\nname: n\nsteps:\n  - wait: 1\nfinally:\n  - mark: done\n"
-        )
+        recipe = parse("version: 1\nname: n\nsteps:\n  - wait: 1\nfinally:\n  - mark: done\n")
         assert isinstance(recipe.finally_[0], MarkStep)
         assert recipe.phase(RecipePhase.FINALLY) == recipe.finally_
         assert recipe.phase(RecipePhase.STEPS) == recipe.steps
@@ -164,7 +162,7 @@ class TestRefusals:
         assert caught.value.details["keys"] == ["device", "voltage"]
 
     def test_an_error_names_the_phase_and_the_index(self) -> None:
-        """"Invalid recipe" is not a diagnosis; "finally step 1" is."""
+        """ "Invalid recipe" is not a diagnosis; "finally step 1" is."""
         with pytest.raises(RecipeError) as caught:
             parse("version: 1\nname: n\nsteps:\n  - wait: 1\nfinally:\n  - wait: 1\n  - {}\n")
         assert caught.value.details["phase"] == "finally"
@@ -350,9 +348,7 @@ class TestFileResolution:
         found = {path.name for path in list_recipe_files()}
         assert found == {"smoke.yaml", "deep.yml"}
 
-    def test_a_path_outside_the_roots_is_refused(
-        self, recipe_dir: Path, tmp_path: Path
-    ) -> None:
+    def test_a_path_outside_the_roots_is_refused(self, recipe_dir: Path, tmp_path: Path) -> None:
         """The reference arrives from a CLI argument or an MCP call, so it is
         treated as hostile."""
         outside = tmp_path / "elsewhere.yaml"

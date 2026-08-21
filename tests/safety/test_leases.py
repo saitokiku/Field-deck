@@ -94,7 +94,7 @@ async def test_an_expiring_lease_disables_the_output(
 ) -> None:
     """Nobody renewed, so the daemon puts the rail down on its own."""
     lease_id = await energise(client, lease_ttl_s=30)
-    lease = next(l for l in daemon.safety.leases.active() if l.lease_id == lease_id)
+    lease = next(entry for entry in daemon.safety.leases.active() if entry.lease_id == lease_id)
     lease.expires_monotonic_ns = monotonic_ns() - 1
 
     await wait_for(
@@ -107,9 +107,10 @@ async def test_an_expiring_lease_disables_the_output(
     expired = [e for e in recent if e.type is EventType.LEASE_EXPIRED]
     assert [e.payload.get("lease_id") for e in expired] == [lease_id]
     safed = [
-        e
-        for e in recent
-        if e.type is EventType.SAFE_STATE_APPLIED and e.payload.get("reason") == "output lease expired"
+        event
+        for event in recent
+        if event.type is EventType.SAFE_STATE_APPLIED
+        and event.payload.get("reason") == "output lease expired"
     ]
     assert [e.device_id for e in safed] == [SIM_PSU]
 
@@ -118,7 +119,7 @@ async def test_renewing_keeps_the_output_up(
     client: InstrumentClient, daemon: InstrumentDaemon
 ) -> None:
     lease_id = await energise(client, lease_ttl_s=30)
-    before = next(l for l in daemon.safety.leases.active() if l.lease_id == lease_id)
+    before = next(entry for entry in daemon.safety.leases.active() if entry.lease_id == lease_id)
     deadline_before = before.expires_monotonic_ns
 
     reply = await client.call("safety.lease_renew", {"lease_id": lease_id, "ttl_s": 45})
@@ -132,7 +133,7 @@ async def test_an_already_expired_lease_cannot_be_renewed(
 ) -> None:
     """Re-acquire instead: renewing a lapsed handle would hide the lapse."""
     lease_id = await energise(client, lease_ttl_s=30)
-    lease = next(l for l in daemon.safety.leases.active() if l.lease_id == lease_id)
+    lease = next(entry for entry in daemon.safety.leases.active() if entry.lease_id == lease_id)
     lease.expires_monotonic_ns = monotonic_ns() - 1
 
     with pytest.raises(LeaseError):
@@ -146,9 +147,7 @@ async def test_releasing_a_lease_explicitly_drives_safe_state(
     reply = await client.call("safety.lease_release", {"lease_id": lease_id})
 
     assert reply["released"] == lease_id
-    await wait_for(
-        lambda: output_is_off(client), message="releasing the lease left the rail up"
-    )
+    await wait_for(lambda: output_is_off(client), message="releasing the lease left the rail up")
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +205,7 @@ async def test_a_lease_expiring_does_not_revoke_authorization(
     is no longer trusted" — they can turn it back on without re-arming.
     """
     lease_id = await energise(client, lease_ttl_s=30)
-    lease = next(l for l in daemon.safety.leases.active() if l.lease_id == lease_id)
+    lease = next(entry for entry in daemon.safety.leases.active() if entry.lease_id == lease_id)
     lease.expires_monotonic_ns = monotonic_ns() - 1
     await wait_for(lambda: output_is_off(client), message="the rail never came down")
 

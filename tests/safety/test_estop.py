@@ -155,9 +155,7 @@ async def test_turning_an_output_off_is_still_permitted_during_a_stop(
     assert result.result["output"] is False
 
 
-async def test_turning_an_output_on_during_a_stop_is_refused(
-    client: InstrumentClient, arm
-) -> None:
+async def test_turning_an_output_on_during_a_stop_is_refused(client: InstrumentClient, arm) -> None:
     """Enabling stays refused while the stop is latched.
 
     Note *which* refusal it is.  ``psu.output`` declares

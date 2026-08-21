@@ -6,6 +6,12 @@ something.  If you change one of them, change it deliberately.
 This module builds its own :class:`SafetyManager` rather than taking the
 shared fixture, so that the authorization rules are pinned to the policy
 written here and cannot drift when a fixture elsewhere gains a new default.
+
+These are unit tests: they prove the rules are *right*.  They say nothing about
+whether the dispatcher consults them, which is what ``test_authorization.py``
+defends by driving a real daemon over a real socket.  The two files overlap on
+purpose and neither replaces the other -- a manager with perfect rules that
+nothing calls would pass every test in this file.
 """
 
 from __future__ import annotations
@@ -144,9 +150,7 @@ class TestScope:
 
 class TestExpiry:
     def test_a_grant_stops_working_when_it_lapses(self, safety: SafetyManager) -> None:
-        grant = safety.arm(
-            permission=PermissionLevel.POWER, ttl_s=0.01, source=ClientSource.FDCTL
-        )
+        grant = safety.arm(permission=PermissionLevel.POWER, ttl_s=0.01, source=ClientSource.FDCTL)
         assert grant.is_active(monotonic_ns())
         # Rather than sleeping, ask the grant about a moment in its future.
         future = grant.expires_monotonic_ns + 1
@@ -198,9 +202,7 @@ class TestEstop:
             authorize(safety, PermissionLevel.PASSIVE)
         # ...unless the action declares itself safe during a stop, which is how
         # "turn the output off" and "read status" stay reachable.
-        assert (
-            authorize(safety, PermissionLevel.PASSIVE, allowed_during_estop=True) is None
-        )
+        assert authorize(safety, PermissionLevel.PASSIVE, allowed_during_estop=True) is None
 
     def test_cannot_arm_while_latched(self, safety: SafetyManager) -> None:
         safety.engage_estop(reason="test", source=ClientSource.HMI)

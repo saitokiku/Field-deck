@@ -11,6 +11,7 @@ session) is detected and reported rather than smoothed over.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from itertools import pairwise
 
 import pytest
 
@@ -82,8 +83,8 @@ class TestTimeAnchor:
         readings = [0, 1_000, 999_999_999, 1_000_000_000, 10**12]
         projected = [anchor.utc_for(value) for value in readings]
         assert projected == sorted(projected)
-        assert [b - a for a, b in zip(projected, projected[1:], strict=False)] == [
-            b - a for a, b in zip(readings, readings[1:], strict=False)
+        assert [later - earlier for earlier, later in pairwise(projected)] == [
+            later - earlier for earlier, later in pairwise(readings)
         ]
 
     def test_the_anchor_does_not_mutate_what_it_projects(self) -> None:

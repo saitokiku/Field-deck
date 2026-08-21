@@ -83,9 +83,7 @@ class TestArmRegistry:
 
     def test_authorization_is_exact_class(self) -> None:
         registry = ArmRegistry()
-        registry.create(
-            permission=PermissionLevel.DESTRUCTIVE, ttl_s=60, source=ClientSource.FDCTL
-        )
+        registry.create(permission=PermissionLevel.DESTRUCTIVE, ttl_s=60, source=ClientSource.FDCTL)
         assert registry.find(
             permission=PermissionLevel.DESTRUCTIVE, action="flash.erase", device_id=None
         )
@@ -218,9 +216,7 @@ class TestLeases:
     def test_renewing_something_that_never_existed_says_what_survived(self) -> None:
         with pytest.raises(LeaseError) as caught:
             LeaseManager().renew("lease-nope")
-        assert caught.value.preserved == (
-            "the device was left in whatever state it was already in"
-        )
+        assert caught.value.preserved == ("the device was left in whatever state it was already in")
 
     def test_sweeping_hands_back_each_lapsed_lease_once(self) -> None:
         manager = LeaseManager()
@@ -309,9 +305,7 @@ class TestLimitEnforcer:
         with pytest.raises(SafetyLimitExceeded):
             enforcer.check_params({"voltage": 30.0}, checks)
 
-    def test_an_absent_optional_parameter_is_not_a_violation(
-        self, enforcer: LimitEnforcer
-    ) -> None:
+    def test_an_absent_optional_parameter_is_not_a_violation(self, enforcer: LimitEnforcer) -> None:
         enforcer.check_params({}, (LimitCheck(param="voltage", quantity="psu.voltage"),))
 
     def test_a_required_parameter_that_is_missing_is_a_violation(
@@ -353,9 +347,7 @@ class TestLimitEnforcer:
         with pytest.raises(ValueError, match="unknown derived limit op"):
             DerivedLimitCheck(quantity="q", params=("a",), op="convolve").compute([1.0])
 
-    def test_describing_the_limits_is_what_the_hmi_shows(
-        self, enforcer: LimitEnforcer
-    ) -> None:
+    def test_describing_the_limits_is_what_the_hmi_shows(self, enforcer: LimitEnforcer) -> None:
         described = enforcer.describe()
         assert described["psu.voltage"] == {"minimum": 0.0, "maximum": 24.0, "unit": "V"}
 
@@ -367,7 +359,7 @@ class TestLimitEnforcer:
 
 class TestEstopController:
     def test_it_latches_rather_than_following_the_fault(self) -> None:
-        """"The fault cleared itself" is not a reason to re-energise a bench."""
+        """ "The fault cleared itself" is not a reason to re-energise a bench."""
         controller = EstopController()
         controller.engage("over-current", ClientSource.HMI)
         assert controller.active
@@ -434,9 +426,7 @@ class TestSafetyManager:
             update={"denied_permissions": [PermissionLevel.DESTRUCTIVE]}
         )
         safety = SafetyManager(policy)
-        safety.arm(
-            permission=PermissionLevel.DESTRUCTIVE, ttl_s=60, source=ClientSource.FDCTL
-        )
+        safety.arm(permission=PermissionLevel.DESTRUCTIVE, ttl_s=60, source=ClientSource.FDCTL)
         with pytest.raises(PermissionDenied, match="safety policy"):
             authorize(safety, PermissionLevel.DESTRUCTIVE)
 
@@ -454,9 +444,7 @@ class TestSafetyManager:
         with pytest.raises(PermissionDenied):
             authorize(safety, PermissionLevel.FLASH)
 
-    def test_an_estop_safe_action_is_exempt_from_the_latch(
-        self, safety: SafetyManager
-    ) -> None:
+    def test_an_estop_safe_action_is_exempt_from_the_latch(self, safety: SafetyManager) -> None:
         safety.estop_controller.engage("test", ClientSource.HMI)
         assert authorize(safety, PermissionLevel.PASSIVE, allowed_during_estop=True) is None
         with pytest.raises(EstopActive):
@@ -482,14 +470,10 @@ class TestSafetyManager:
         assert armed_safety.snapshot().armed_permissions == []
         assert armed_safety.leases.active() == []
 
-    def test_the_sweep_reports_expiry_of_both_kinds(
-        self, safety_config: SafetyConfig
-    ) -> None:
+    def test_the_sweep_reports_expiry_of_both_kinds(self, safety_config: SafetyConfig) -> None:
         emitted = []
         safety = SafetyManager(safety_config, emit=emitted.append)
-        grant = safety.arm(
-            permission=PermissionLevel.POWER, ttl_s=60, source=ClientSource.FDCTL
-        )
+        grant = safety.arm(permission=PermissionLevel.POWER, ttl_s=60, source=ClientSource.FDCTL)
         lease = safety.leases.acquire(
             device_id="psu-a", action="psu.output", owner=ClientSource.HMI, ttl_s=30
         )
@@ -504,9 +488,7 @@ class TestSafetyManager:
         assert EventType.ARM_EXPIRED in types
         assert EventType.LEASE_EXPIRED in types
 
-    def test_reset_returns_the_unit_to_its_boot_state(
-        self, armed_safety: SafetyManager
-    ) -> None:
+    def test_reset_returns_the_unit_to_its_boot_state(self, armed_safety: SafetyManager) -> None:
         """Which is what the daemon does at startup, so nothing is inherited."""
         armed_safety.leases.acquire(
             device_id="psu-a", action="psu.output", owner=ClientSource.HMI, ttl_s=30

@@ -103,9 +103,7 @@ class TestPlanning:
         assert [step.phase for step in plan.finally_steps] == [RecipePhase.FINALLY]
         assert len(plan.all_steps) == 2
 
-    async def test_devices_are_resolved_and_reported_with_their_real_ids(
-        self, plan_of
-    ) -> None:
+    async def test_devices_are_resolved_and_reported_with_their_real_ids(self, plan_of) -> None:
         plan = plan_of(
             "version: 1\nname: n\nrequires:\n  devices: [role:psu]\n"
             "steps:\n  - action: psu.status\n    device: role:psu\n"
@@ -193,7 +191,7 @@ class TestRefusals:
             "steps:\n"
             f"  - action: psu.set\n    device: {SIM_PSU}\n    voltage: 60.0\n"
             "  - action: does.not.exist\n"
-            '  - assert: "__import__(\'os\')"\n'
+            "  - assert: \"__import__('os')\"\n"
         )
         assert len(plan.errors) >= 4
 
@@ -202,12 +200,12 @@ class TestRefusals:
             (fixtures_dir / "recipes" / "malicious-assert.yaml").read_text(encoding="utf-8")
         )
         assert not plan.ok
-        assert any("assert" in problem.code or "assert" in problem.message.lower()
-                   for problem in plan.errors)
+        assert any(
+            "assert" in problem.code or "assert" in problem.message.lower()
+            for problem in plan.errors
+        )
 
-    async def test_an_assertion_is_parsed_at_compile_time_not_at_step_nine(
-        self, plan_of
-    ) -> None:
+    async def test_an_assertion_is_parsed_at_compile_time_not_at_step_nine(self, plan_of) -> None:
         plan = plan_of('version: 1\nname: n\nsteps:\n  - assert: "can.frames >"\n')
         assert not plan.ok
 
@@ -282,9 +280,7 @@ class TestLimits:
 
 
 class TestWarnings:
-    async def test_a_lease_shorter_than_the_steps_that_follow_is_a_warning(
-        self, plan_of
-    ) -> None:
+    async def test_a_lease_shorter_than_the_steps_that_follow_is_a_warning(self, plan_of) -> None:
         """The daemon will drop the rail mid-test; better to say so up front."""
         plan = plan_of(
             "version: 1\nname: n\nsteps:\n"

@@ -28,9 +28,7 @@ async def test_a_restarted_daemon_starts_safe_with_no_grants(daemon_factory) -> 
         await client.call("safety.arm", {"permission": "POWER", "ttl_s": 300})
         await client.call("safety.arm", {"permission": "QUERY", "ttl_s": 300})
         await client.execute("psu.set", {"device": SIM_PSU, "voltage": 12.0})
-        await client.execute(
-            "psu.output", {"device": SIM_PSU, "enabled": True, "lease_ttl_s": 300}
-        )
+        await client.execute("psu.output", {"device": SIM_PSU, "enabled": True, "lease_ttl_s": 300})
         await client.call("safety.estop", {"reason": "fault before the restart"})
 
         snapshot = first.safety.snapshot()
@@ -97,9 +95,10 @@ async def test_evidence_outlives_the_daemon_that_recorded_it(daemon_factory) -> 
     second = await daemon_factory()
 
     async with InstrumentClient(second.socket_path, source=ClientSource.FDCTL) as client:
-        listed = {entry["id"]: entry for entry in (await client.execute("session.list")).result[
-            "sessions"
-        ]}
+        listed = {
+            entry["id"]: entry
+            for entry in (await client.execute("session.list")).result["sessions"]
+        }
         assert session_id in listed
         assert listed[session_id]["active"] is False
 

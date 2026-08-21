@@ -10,6 +10,12 @@ path to a simulated PSU or a simulated CAN interface that skips the check.
 Nothing here sleeps to make a grant expire.  Expiry is forced by moving the
 grant's own deadline into the past, so the test is deterministic and instant
 and still goes through exactly the code an expired grant goes through.
+
+Companion file: ``test_permission_matrix.py`` pins the same rules as unit tests
+against a bare :class:`SafetyManager`, exhaustively -- every (granted,
+requested) pair rather than the few interesting ones.  The overlap between the
+two files is deliberate and neither replaces the other: the matrix proves the
+rule is right, these prove the pipeline actually asks.
 """
 
 from __future__ import annotations
@@ -55,11 +61,11 @@ async def test_control_action_is_rejected_while_safe(
     assert [e.action for e in denials] == ["can.send"]
 
 
-async def test_the_same_action_succeeds_once_control_is_armed(client: InstrumentClient, arm) -> None:
+async def test_the_same_action_succeeds_once_control_is_armed(
+    client: InstrumentClient, arm
+) -> None:
     await arm(PermissionLevel.CONTROL)
-    result = await client.execute(
-        "can.send", {"device": SIM_CAN, "can_id": 0x100, "data": "01 02"}
-    )
+    result = await client.execute("can.send", {"device": SIM_CAN, "can_id": 0x100, "data": "01 02"})
     assert result.ok
     assert result.permission is PermissionLevel.CONTROL
 
@@ -113,9 +119,7 @@ async def test_a_device_scoped_grant_does_not_cover_another_device(
     client: InstrumentClient, arm
 ) -> None:
     await arm(PermissionLevel.CONTROL, scope=ArmScope(kind="device", device_id=SIM_CAN))
-    assert (
-        await client.execute("can.send", {"device": SIM_CAN, "can_id": 1, "data": "00"})
-    ).ok
+    assert (await client.execute("can.send", {"device": SIM_CAN, "can_id": 1, "data": "00"})).ok
     with pytest.raises(PermissionDenied):
         await client.execute("serial.send", {"device": SIM_SERIAL, "text": "x"})
 
@@ -130,9 +134,7 @@ async def test_an_expired_grant_no_longer_authorizes(
 ) -> None:
     """Grants lapse.  The clock is moved, not waited on."""
     grant_id = (await arm(PermissionLevel.CONTROL, ttl_s=60))["grant_id"]
-    assert (
-        await client.execute("can.send", {"device": SIM_CAN, "can_id": 1, "data": "00"})
-    ).ok
+    assert (await client.execute("can.send", {"device": SIM_CAN, "can_id": 1, "data": "00"})).ok
 
     grant = daemon.safety.arm_registry.get(grant_id)
     assert grant is not None
@@ -234,9 +236,7 @@ async def test_restricted_socket_refuses_arming_even_when_the_client_claims_hmi(
     whatever the request says it is.
     """
     with pytest.raises(PermissionDenied) as caught:
-        await ai_client.call(
-            "safety.arm", {"permission": "POWER", "ttl_s": 30, "source": "hmi"}
-        )
+        await ai_client.call("safety.arm", {"permission": "POWER", "ttl_s": 30, "source": "hmi"})
 
     assert "restricted socket" in str(caught.value)
     assert caught.value.details["socket"] == "restricted"
@@ -277,7 +277,7 @@ async def test_restricted_socket_still_allows_passive_work(ai_client: Instrument
 # ---------------------------------------------------------------------------
 
 
-async def test_a_class_disabled_by_policy_cannot_be_used_even_when_armed(
+async def test_a_class_disabled_by_policy_is_refused_by_the_dispatcher(
     daemon_factory, safety_config
 ) -> None:
     """``denied_permissions`` outranks an operator's own grant.
@@ -298,9 +298,7 @@ async def test_a_class_disabled_by_policy_cannot_be_used_even_when_armed(
         assert caught.value.preserved == "no command was sent to the device"
 
 
-async def test_arming_is_refused_while_the_stop_is_latched(
-    client: InstrumentClient, arm
-) -> None:
+async def test_arming_is_refused_while_the_stop_is_latched(client: InstrumentClient, arm) -> None:
     await client.call("safety.estop", {"reason": "test"})
     with pytest.raises(EstopActive):
         await arm(PermissionLevel.POWER)

@@ -149,9 +149,7 @@ class TestEventQueries:
 
 
 class TestWindow:
-    def test_it_returns_every_kind_of_record_around_one_instant(
-        self, timeline: Timeline
-    ) -> None:
+    def test_it_returns_every_kind_of_record_around_one_instant(self, timeline: Timeline) -> None:
         """The correlation query, with all four subsystems in one answer."""
         fault_at = 10_000_000_000  # 10 s on the monotonic axis
 
@@ -216,9 +214,7 @@ class TestWindow:
 
 
 class TestMeasurements:
-    def test_measurements_are_queryable_by_quantity_and_device(
-        self, timeline: Timeline
-    ) -> None:
+    def test_measurements_are_queryable_by_quantity_and_device(self, timeline: Timeline) -> None:
         timeline.add_measurement(
             monotonic_ns=1, utc_ns=1, quantity="psu.voltage", value=24.0, device_id="psu", unit="V"
         )
@@ -296,9 +292,7 @@ class TestMarksAndSummary:
             ("second", 200, ClientSource.RECIPE),
             ("first", 100, ClientSource.HMI),
         ):
-            timeline.add_mark(
-                SessionMark(label=label, monotonic_ns=stamp, utc_ns=0, source=source)
-            )
+            timeline.add_mark(SessionMark(label=label, monotonic_ns=stamp, utc_ns=0, source=source))
         marks = timeline.marks()
         assert [mark["label"] for mark in marks] == ["first", "second"]
         assert marks[0]["source"] == str(ClientSource.HMI)

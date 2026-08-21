@@ -78,9 +78,7 @@ class TestCatalogue:
             assert 0 <= value <= model.mask
 
     @pytest.mark.parametrize("name", sorted(CATALOGUE))
-    def test_computation_is_deterministic_and_does_not_consume_input(
-        self, name: str
-    ) -> None:
+    def test_computation_is_deterministic_and_does_not_consume_input(self, name: str) -> None:
         model = CATALOGUE[name]
         payload = bytearray(b"\x01\x02\x03")
         first = model.compute(bytes(payload))

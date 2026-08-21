@@ -36,9 +36,12 @@ def telemetry(count: int = 200) -> bytes:
 def modbus_traffic(exchanges: int = 40) -> bytes:
     request = bytes([0x01, 0x03, 0x00, 0x00, 0x00, 0x02])
     response = bytes([0x01, 0x03, 0x04, 0x00, 0x0A, 0x00, 0x0B])
-    return b"".join(
-        body + crc("crc16-modbus", body).to_bytes(2, "little") for body in (request, response)
-    ) * exchanges
+    return (
+        b"".join(
+            body + crc("crc16-modbus", body).to_bytes(2, "little") for body in (request, response)
+        )
+        * exchanges
+    )
 
 
 def nmea_stream(count: int = 60) -> bytes:
@@ -163,9 +166,7 @@ class TestHonesty:
             pytest.param(b"\x00\x01" * 2048, id="alternating"),
         ],
     )
-    def test_degenerate_streams_do_not_produce_a_confident_named_answer(
-        self, data: bytes
-    ) -> None:
+    def test_degenerate_streams_do_not_produce_a_confident_named_answer(self, data: bytes) -> None:
         hypotheses = classify(data)
         assert any(item.protocol == UNKNOWN for item in hypotheses)
         for item in hypotheses:

@@ -122,11 +122,21 @@ class TestCollection:
 
     def test_a_duplicate_action_name_is_a_programming_error(self) -> None:
         class Duplicated:
-            @action("dupe", permission=PermissionLevel.PASSIVE, state_changing=False, description="a")
+            @action(
+                "dupe",
+                permission=PermissionLevel.PASSIVE,
+                state_changing=False,
+                description="first",
+            )
             async def first(self, ctx: ActionContext, params: NoParams) -> dict[str, Any]:
                 return {}
 
-            @action("dupe", permission=PermissionLevel.PASSIVE, state_changing=False, description="b")
+            @action(
+                "dupe",
+                permission=PermissionLevel.PASSIVE,
+                state_changing=False,
+                description="second",
+            )
             async def second(self, ctx: ActionContext, params: NoParams) -> dict[str, Any]:
                 return {}
 
@@ -167,9 +177,7 @@ class TestSpecMetadata:
         assert descriptor.safe_state_note
         assert descriptor.params_schema["properties"]["enabled"]["type"] == "boolean"
 
-    def test_a_descriptor_does_not_leak_the_limit_machinery(
-        self, driver: ExampleDriver
-    ) -> None:
+    def test_a_descriptor_does_not_leak_the_limit_machinery(self, driver: ExampleDriver) -> None:
         """Limits are the daemon's business; the client sees the permission."""
         descriptor = driver.actions()["example.output"].describe()
         assert not hasattr(descriptor, "limit_checks")
@@ -208,9 +216,7 @@ class TestPermissionResolution:
         assert spec.effective_permission(enabling) is PermissionLevel.POWER
         assert spec.effective_permission(disabling) is PermissionLevel.PASSIVE
 
-    def test_without_a_resolver_the_declared_permission_stands(
-        self, driver: ExampleDriver
-    ) -> None:
+    def test_without_a_resolver_the_declared_permission_stands(self, driver: ExampleDriver) -> None:
         spec = driver.actions()["example.status"]
         assert (
             spec.effective_permission(DeviceParams(device="sim:visa:example"))
@@ -259,9 +265,7 @@ class TestDriverLifecycle:
         await driver.connect()
         assert driver.descriptor.state is ConnectionState.READY
 
-    async def test_probe_is_false_only_for_an_absent_device(
-        self, driver: ExampleDriver
-    ) -> None:
+    async def test_probe_is_false_only_for_an_absent_device(self, driver: ExampleDriver) -> None:
         assert await driver.probe() is True
         driver._set_state(ConnectionState.ABSENT)
         assert await driver.probe() is False

@@ -292,9 +292,7 @@ def restricted_socket(daemon: InstrumentDaemon) -> Path:
 
 
 @pytest.fixture
-async def ai_client(
-    client_factory: ClientFactory, restricted_socket: Path
-) -> InstrumentClient:
+async def ai_client(client_factory: ClientFactory, restricted_socket: Path) -> InstrumentClient:
     """A client on the restricted socket, as the MCP server would connect.
 
     It declares ``source=claude``, but the socket forces that identity anyway —

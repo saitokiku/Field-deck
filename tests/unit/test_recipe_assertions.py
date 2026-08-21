@@ -74,15 +74,11 @@ class TestRejectsMaliciousInput:
             "breakpoint()",
         ],
     )
-    def test_escapes_and_side_effects_are_refused_at_compile_time(
-        self, expression: str
-    ) -> None:
+    def test_escapes_and_side_effects_are_refused_at_compile_time(self, expression: str) -> None:
         """Refused before the recipe runs, not while the DUT is energised."""
         with pytest.raises(RecipeError) as caught:
             compile_expression(expression)
-        assert caught.value.preserved == (
-            "the assertion was not evaluated and no action was taken"
-        )
+        assert caught.value.preserved == ("the assertion was not evaluated and no action was taken")
 
     @pytest.mark.parametrize(
         "expression",

@@ -99,9 +99,7 @@ class TestEventModel:
 
 class TestAuditClassification:
     @pytest.mark.parametrize("event_type", sorted(AUDIT_EVENTS))
-    def test_every_audit_type_is_flagged_for_the_audit_log(
-        self, event_type: EventType
-    ) -> None:
+    def test_every_audit_type_is_flagged_for_the_audit_log(self, event_type: EventType) -> None:
         assert new_event(event_type).is_audit
 
     def test_the_authorization_story_is_all_audit(self) -> None:

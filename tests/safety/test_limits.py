@@ -77,15 +77,11 @@ async def test_a_derived_limit_catches_a_product_neither_parameter_exceeds(
     assert limits["psu.power"]["maximum"] == 6.0
 
     assert (
-        await client.execute(
-            "psu.set", {"device": SIM_PSU, "voltage": 5.0, "current_limit": 0.5}
-        )
+        await client.execute("psu.set", {"device": SIM_PSU, "voltage": 5.0, "current_limit": 0.5})
     ).ok
 
     with pytest.raises(SafetyLimitExceeded) as caught:
-        await client.execute(
-            "psu.set", {"device": SIM_PSU, "voltage": 5.0, "current_limit": 2.0}
-        )
+        await client.execute("psu.set", {"device": SIM_PSU, "voltage": 5.0, "current_limit": 2.0})
 
     assert caught.value.details["quantity"] == "psu.power"
     assert caught.value.details["value"] == pytest.approx(10.0)
