@@ -55,6 +55,11 @@ jobs:
       - name: Test
         run: pytest -ra --durations=10
 
+      - name: Documented commands
+        # Runs the fdctl commands printed in README.md and docs/ and fails on
+        # any that Click cannot parse. Six were wrong when this was written.
+        run: pytest tests/test_documented_commands.py -ra
+
   import-cost:
     # `fdctl status` should not pay for the HMI. fielddeck/__init__.py uses PEP
     # 562 lazy re-exports to keep that true, and it is the kind of property that

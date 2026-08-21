@@ -172,7 +172,7 @@ functions (`abs`, `min`, `max`, `len`, `round`, `any`, `all`).
 Namespace keys are exactly what an action returned. Check with:
 
 ```bash
-fdctl --json call can.stats --params '{"device":"can0","duration_s":1}' | jq keys
+fdctl --json call can.stats device=can0 duration_s=1 | jq keys
 ```
 
 Watch for near-miss keys. In `can-bringup` the example asserts on `can.count`,

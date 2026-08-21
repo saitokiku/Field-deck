@@ -77,7 +77,7 @@ Reassembles multi-frame CAN messages: single frames, first frame + consecutive
 frames, flow control, block size and separation time.
 
 ```bash
-fdctl call can.isotp --json '{"device":"can0","path":"can/can0-capture-0001.log"}'
+fdctl call can.isotp artifact_path=can/can0-capture-0001.log
 ```
 
 Reports what it could not reassemble as explicitly as what it could. A gap in a
@@ -96,7 +96,7 @@ negative-response-code interpretation.
 
 ```bash
 fdctl call uds.services          # the catalogue, with FieldDeck's classification
-fdctl call can.uds_decode --json '{"device":"can0","path":"..."}'
+fdctl call can.uds_decode artifact_path=can/can0-capture-0001.log
 ```
 
 ### Each service carries a FieldDeck permission class
@@ -129,7 +129,7 @@ address, with PGN naming for the common set, plus transport protocol (BAM and
 RTS/CTS) reassembly.
 
 ```bash
-fdctl call can.j1939 --json '{"device":"can0","path":"..."}'
+fdctl call can.j1939 artifact_path=can/can0-capture-0001.log
 ```
 
 An unknown PGN is reported as an unknown PGN with its number, not silently
@@ -204,7 +204,7 @@ applied silently.
 
 ```bash
 fdctl analyze --file capture.bin
-fdctl call tools.identify_protocol --json '{"hex":"..."}'
+fdctl call tools.identify_protocol hex=55AA0410007F0091
 ```
 
 Ranked hypotheses with confidence and the evidence for each. Verified: Modbus
@@ -278,8 +278,9 @@ array. Capture, then decode I²C, SPI or UART.
 
 ```bash
 fdctl call logic.devices
-fdctl call logic.capture --json '{"device":"...","channels":8,"samplerate":"4MHz","seconds":2}'
-fdctl call logic.decode --json '{"device":"...","protocol":"i2c"}'
+fdctl call logic.capture device=sim:logic:sim-la-0 samplerate=4m seconds=2
+fdctl call logic.decode device=sim:logic:sim-la-0 \
+    artifact_path=logic/sim-la-0-logic-0001.sr decoder=i2c
 ```
 
 Decode output is a derived artifact with provenance, like everything else.

@@ -329,7 +329,8 @@ A wildcard `remote.bind` is rejected outright — that is a validator, not a bug
 ## `flash.program` fails
 
 ```bash
-fdctl call flash.plan --json '{"device":"...","firmware":"app.bin"}'
+fdctl call flash.plan tool=openocd operation=program \
+    target=stm32f4x interface=stlink firmware_path=app.bin
 ```
 
 `flash.plan` is PASSIVE and returns the **literal argument vector** that would

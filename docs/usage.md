@@ -146,9 +146,9 @@ Capture writes an immutable candump-format artifact with a SHA-256:
 
 ```bash
 fdctl can decode <capture-artifact> --dbc /path/to/vehicle.dbc
-fdctl call can.isotp --json '{"device":"can0","path":"can/can0-capture-0001.log"}'
-fdctl call can.uds_decode ...
-fdctl call can.j1939 ...
+fdctl call can.isotp artifact_path=can/can0-capture-0001.log
+fdctl call can.uds_decode artifact_path=can/can0-capture-0001.log
+fdctl call can.j1939 artifact_path=can/can0-capture-0001.log
 ```
 
 Decoding produces a **new** artifact recording which artifact it came from and
@@ -341,7 +341,8 @@ step. Then arm exactly those classes. See [recipes.md](recipes.md).
 ## Flashing
 
 ```bash
-fdctl call flash.plan --json '{"device":"...","firmware":"app.bin"}'
+fdctl call flash.plan tool=openocd operation=program \
+    target=stm32f4x interface=stlink firmware_path=app.bin
 ```
 
 `flash.plan` is **PASSIVE**. It returns the literal argument vector that would be
