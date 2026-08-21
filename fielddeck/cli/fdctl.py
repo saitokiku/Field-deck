@@ -1234,6 +1234,7 @@ def modbus_write(
     ]
     if len(given) != 1:
         _usage_error(settings, "give exactly one of --coil, --register or --registers", given=given)
+    extra: dict[str, Any]
     if coil is not None:
         action, extra = "modbus.write_coil", {"value": coil}
     elif register is not None:
