@@ -37,7 +37,10 @@ _BENCH_ROLES = (DeviceRole.PSU, DeviceRole.DMM, DeviceRole.SCOPE, DeviceRole.LOA
 
 _TILES: tuple[tuple[str, str, str], ...] = (
     ("bus", "BUS", "CAN 485 UART"),
-    ("bench", "BENCH", "PSU DMM SCOPE"),
+    # PSU, DMM and LOAD are what the shipped profiles actually cover. A tile
+    # advertising SCOPE sends an operator into a screen that can only offer
+    # raw scpi.query, which is a worse experience than the tile not claiming it.
+    ("bench", "BENCH", "PSU DMM LOAD"),
     ("logic", "LOGIC", "SPI I2C LA"),
     ("device", "DEVICE", "SWD FLASH USB"),
     ("tools", "TOOLS", "CRC HEX CONV"),

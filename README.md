@@ -145,7 +145,7 @@ The minimum that is genuinely useful, and what each thing buys you.
 | **CAN / CAN FD** | A SocketCAN-capable interface. MCP2515 HATs (SPI) are cheap and cap out around 500 kbit/s reliably; a Waveshare 2-CH CAN FD HAT (MCP2518FD) or a USB Kvaser/PEAK/CANable is better. **Do not** use an interface without a proper transceiver. |
 | **RS-485 / Modbus RTU** | A USB-RS485 adapter with automatic direction control, or a MAX3485 breakout. Note whether your bus needs 120 Ω termination — FieldDeck will not guess. |
 | **RS-232** | A real level shifter (MAX3232). A TTL adapter on an RS-232 line sees ±12 V and dies. |
-| **Bench instruments** | Anything speaking SCPI over USBTMC or LXI: Rigol DP800/DS, Siglent SPD/SDS/SDL, Keysight, Tektronix, Keithley. |
+| **Bench instruments** | Typed support ships for **supplies, DMMs and electronic loads** — Rigol DP800/DL3000, Siglent SPD/SDL, Keysight 3446x, Korad/Tenma. Oscilloscopes and function generators are reachable only through raw `scpi.query`; there is no typed scope support yet. |
 | **Firmware / debug** | ST-Link V2, J-Link, CMSIS-DAP, or a Pi acting as an SWD probe via OpenOCD. |
 | **Logic analysis** | Any `sigrok`-supported analyzer. An $8 8-channel clone is genuinely useful here. |
 
@@ -205,7 +205,7 @@ remediation command for every failure.
 | **Serial** | UART / RS-232 / RS-485, arbitrary framing, byte-exact capture, auto-baud by evidence |
 | **CAN** | Raw frames, CAN FD, DBC decode, **ISO-TP** (ISO 15765-2), **UDS** (ISO 14229), **J1939** PGN decode |
 | **Modbus** | RTU and TCP, read/write, address scan with an explicit fault-report policy |
-| **SCPI** | Bench supplies, loads, DMMs, scopes over USBTMC and LXI |
+| **SCPI** | Bench supplies, DMMs and electronic loads over USBTMC and LXI — plus raw `scpi.query` for anything else |
 | **Logic** | `sigrok` capture, I²C / SPI / UART decode |
 | **Debug** | OpenOCD, pyOCD, esptool, avrdude, dfu-util, picotool — behind a `FLASH` grant |
 | **Analysis** | 20 CRC models with reverse lookup, framing detection, COBS/SLIP, entropy, timing histograms, protocol identification with stated confidence |

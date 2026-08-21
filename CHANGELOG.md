@@ -193,6 +193,14 @@ where the sharp edges are:
   dry-run and syntax-checked, not run on a Pi.
 - `config/ui.example.yaml` is a reserved design sketch; no loader reads it, it
   says so at the top, and the installer deliberately does not install it.
+- **No typed oscilloscope or function-generator support.** The six shipped
+  instrument profiles cover supplies, DMMs and electronic loads. A scope is
+  reachable through raw `scpi.query` and nothing more; there is no waveform
+  capture, screenshot or trigger handling.
+- **`fdctl` has no `logic`, `debug`, `firmware` or `flash` command family.**
+  Every one of those actions is reachable — `fdctl call logic.capture`,
+  `fdctl call flash.plan` — but without the typed wrappers the other
+  subsystems have.
 
 [Unreleased]: https://github.com/saitokiku/field-deck/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/saitokiku/field-deck/releases/tag/v0.1.0
