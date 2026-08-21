@@ -293,8 +293,12 @@ class RecipeRunner:
             self._state = RecipeState.CANCELLING
             self._reason = self._reason or "the recipe run was cancelled"
             self._stop.set()
-            await self._classify_stop()
             await self._shielded_cleanup()
+            # Cleanup first, then work out why: attributing the stop is worth a
+            # sentence in the report, and turning the output off is worth more
+            # than that.  A second cancellation must not cost us the cleanup.
+            with contextlib.suppress(asyncio.CancelledError, FieldDeckError):
+                await self._classify_stop()
             self._finish_state()
             self._emit_finished()
             raise
@@ -623,24 +627,28 @@ class RecipeRunner:
                 request_id=request_id,
             )
         )
-        if interruptible:
-            await self._race_against_stop(call, request_id)
-            if not call.done():
-                call.cancel()
-                with contextlib.suppress(asyncio.CancelledError, FieldDeckError):
-                    await call
-                return self._record_step(
-                    step,
-                    started,
-                    StepOutcome.CANCELLED,
-                    error={
-                        "code": str(ErrorCode.ACTION_CANCELLED),
-                        "message": f"{step.action} did not stop when asked; it was abandoned",
-                    },
-                )
-
         try:
+            if interruptible:
+                await self._race_against_stop(call, request_id)
+                if not call.done():
+                    self._drop(call)
+                    return self._record_step(
+                        step,
+                        started,
+                        StepOutcome.CANCELLED,
+                        error={
+                            "code": str(ErrorCode.ACTION_CANCELLED),
+                            "message": f"{step.action} did not stop when asked; it was abandoned",
+                        },
+                    )
             result: ActionResult = await call
+        except asyncio.CancelledError:
+            # The whole run is being torn down.  The step call cannot be left in
+            # flight against a connection that is about to close: its failure
+            # would surface later as an unretrieved task exception in the daemon
+            # log, long after anyone could connect it to this recipe.
+            self._drop(call)
+            raise
         except FieldDeckError as exc:
             reason = _ABORT_REASONS.get(str(exc.code))
             if reason is not None:
@@ -657,6 +665,18 @@ class RecipeRunner:
         if isinstance(lease, dict) and lease.get("lease_id"):
             self._leases.append(str(lease["lease_id"]))
         return self._record_step(step, started, StepOutcome.OK, result=payload)
+
+    @staticmethod
+    def _drop(call: asyncio.Future[Any]) -> None:
+        """Abandon a step call without leaving its outcome unclaimed.
+
+        The outcome is taken by a done-callback rather than awaited, because
+        this runs on teardown paths where awaiting one more thing is not
+        guaranteed to work.  An unclaimed task exception surfaces in the daemon
+        log minutes later with nothing to connect it back to this recipe.
+        """
+        call.cancel()
+        call.add_done_callback(_claim_outcome)
 
     async def _race_against_stop(self, call: asyncio.Future[Any], request_id: str) -> None:
         """Let a step finish, unless the run is stopping — then stop it properly.
@@ -895,6 +915,18 @@ class RecipeRunner:
                 message=message,
                 payload=payload or {},
             )
+        )
+
+
+def _claim_outcome(call: asyncio.Future[Any]) -> None:
+    """Take the outcome of an abandoned step so asyncio does not report it later."""
+    if call.cancelled():
+        return
+    error = call.exception()
+    if error is not None:
+        _log.debug(
+            "an abandoned recipe step failed after the run stopped",
+            extra={"error": str(error)},
         )
 
 

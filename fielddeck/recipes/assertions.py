@@ -34,6 +34,7 @@ from fielddeck.common.errors import RecipeError
 
 __all__ = [
     "ALLOWED_FUNCTIONS",
+    "LITERAL_NAMES",
     "MAX_EXPRESSION_CHARS",
     "AssertionOutcome",
     "CompiledExpression",
@@ -64,6 +65,11 @@ MAX_SEQUENCE_ITEMS = 64
 #: never returns. Bounding the *result* is what actually closes it, and 4096
 #: bits is far beyond anything a real assertion about a bus needs.
 MAX_RESULT_BITS = 4096
+
+#: Recipes are YAML, and a YAML author writes ``false``, not ``False``.  These
+#: spellings are bound as literals so an assertion reads the way the file around
+#: it does; the Python spellings are keywords and parse as constants already.
+LITERAL_NAMES: dict[str, Any] = {"true": True, "false": False, "null": None}
 
 #: The only callables an expression may reach.  Every one is pure, total on
 #: the values the namespace can hold, and cheap.
@@ -191,7 +197,11 @@ def compile_expression(source: str) -> CompiledExpression:
         for node in nodes
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
-    names = tuple(sorted({node.id for node in nodes if isinstance(node, ast.Name)} - called))
+    names = tuple(
+        sorted(
+            {node.id for node in nodes if isinstance(node, ast.Name)} - called - set(LITERAL_NAMES)
+        )
+    )
     return CompiledExpression(source=text, names=names, tree=tree)
 
 
@@ -274,6 +284,8 @@ def _eval(
         return node.value
 
     if isinstance(node, ast.Name):
+        if node.id in LITERAL_NAMES:
+            return LITERAL_NAMES[node.id]
         if node.id not in ns:
             raise _fail(
                 f"no step has produced {node.id!r} yet; available: "
