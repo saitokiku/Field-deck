@@ -227,9 +227,26 @@ until somebody walks over to the bench. With one, the daemon notices the socket
 close and turns it off — through the same `safe_state()` code path everything
 else uses, not a special case.
 
+Renewing has two restrictions, because renewing is pulling the dead-man handle:
+
+- **Only the holder may renew.** A lease says *this client* is still watching.
+  A second client renewing it turns that into a statement about a third party,
+  and a hung operator whose rail is held up by somebody else is exactly the
+  failure the lease exists to prevent.
+- **A renewal cannot lengthen the interval.** Renewing means "keep going for
+  another interval", not "change the interval" — a client that could renew for
+  an hour has replaced its dead-man handle with a timer. Shorter is always
+  allowed; longer is clamped, and the lease reports the interval actually in
+  force.
+
 The safety loop reaps expired grants and leases every **250 ms**: fast enough
 that a lapsed lease drops an output promptly, cheap enough to idle at ~0.09%
 CPU.
+
+An action that is still running when its device is driven to a safe state — by
+an emergency stop, a lapsed lease, or shutdown — does not get to undo it. The
+handler's effect is reverted and the call fails, because otherwise a slow
+`psu.output` could finish after a stop and turn the rail back on.
 
 ---
 
@@ -271,8 +288,10 @@ Claude connects to `instrumentd-ai.sock`, not `instrumentd.sock`.
   permanently. There is no way to connect as `claude` and be recorded as
   something else, or vice versa — the source is assigned by which socket the
   connection arrived on, not claimed by the client.
-- `safety.arm`, `safety.disarm` and `safety.estop_clear` are refused **at the
-  transport**, before any handler sees the request.
+- `safety.arm`, `safety.disarm`, `safety.estop_clear` and `safety.lease_renew`
+  are refused **at the transport**, before any handler sees the request.
+  `safety.lease_release` is deliberately *not* on that list, for the same
+  reason `estop` is available: releasing ends a hazard.
 - `ClientSource.CLAUDE.may_create_grants` is `False`. Even if a request reached
   the safety manager, it would be refused there too.
 - Of 29 MCP tools, **none arms anything**. `estop` is present: Claude can stop

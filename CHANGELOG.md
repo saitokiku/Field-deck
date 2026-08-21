@@ -83,7 +83,8 @@ failure, a hardened systemd unit, udev rules, and a supervised tmux kiosk.
 
 - Two-socket boundary: `instrumentd-ai.sock` stamps `source=claude` by the
   socket rather than by client claim, and refuses `safety.arm`,
-  `safety.disarm` and `safety.estop_clear` at the transport.
+  `safety.disarm`, `safety.estop_clear` and `safety.lease_renew` at the
+  transport. `safety.lease_release` stays available: releasing ends a hazard.
 - The daemon refuses to start on a live socket, so two processes can never both
   believe they own the hardware.
 - Subprocesses are invoked with argument arrays; no shell execution is reachable
@@ -99,6 +100,17 @@ failure, a hardened systemd unit, udev rules, and a supervised tmux kiosk.
 Found during pre-release verification, listed because they say something about
 where the sharp edges are:
 
+- **An in-flight action could undo a safe state that overtook it.** A slow
+  `psu.output(enabled=True)` that was authorized before an emergency stop
+  finished after it, and turned the rail back on. The stop reported success,
+  the action reported success, and the rail was live with the stop latched.
+  Lease expiry lost the same way. Devices now carry a safe-state generation
+  that a handler checks across its own execution.
+- **The restricted AI socket could renew a lease it did not own**, holding a
+  rail up past the interval its operator set — the dead-man handle held down
+  by the thing it exists to be independent of. Renewal is now refused at that
+  transport, restricted to the lease's holder, and cannot lengthen the
+  interval.
 - **An ESTOP bypass.** `allowed_during_estop` was read off the `ActionSpec`
   rather than the resolved permission, so the flag that lets you *de-energise*
   a rail during a latched stop also let you *energise* one. It was masked by
@@ -120,6 +132,9 @@ where the sharp edges are:
   untyped.
 - **Serial ports opened without deasserting DTR/RTS first**, which reboots any
   Arduino or ESP32 you were trying to observe.
+- **The simulated CAN driver kept zero-frame capture files** where the real
+  driver deletes them, so a 0-byte artifact with a hash read as "we recorded
+  and the bus was quiet".
 
 ### Known limitations
 

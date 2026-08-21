@@ -515,7 +515,11 @@ class InstrumentDaemon:
         self, connection: ClientConnection, params: dict[str, Any]
     ) -> dict[str, Any]:
         lease_id = str(params.get("lease_id", ""))
-        lease = self.safety.leases.renew(lease_id, ttl_s=params.get("ttl_s"))
+        lease = self.safety.leases.renew(
+            lease_id,
+            ttl_s=params.get("ttl_s"),
+            connection_id=connection.id,
+        )
         self.bus.publish(
             new_event(
                 EventType.LEASE_RENEWED,

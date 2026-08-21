@@ -38,8 +38,8 @@ This is the core promise. Concretely:
 - A way to act on hardware while an **emergency stop is latched**, other than
   moving toward safety
 - A way to make a **lease** not release on client death, expiry or daemon exit
-- A way to reach `safety.arm`, `safety.disarm` or `safety.estop_clear` from the
-  restricted AI socket
+- A way to reach `safety.arm`, `safety.disarm`, `safety.estop_clear` or
+  `safety.lease_renew` from the restricted AI socket
 - A way to have a request recorded with a **`source` other than the socket it
   arrived on**
 

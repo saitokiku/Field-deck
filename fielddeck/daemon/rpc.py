@@ -63,7 +63,18 @@ Handler = Callable[["ClientConnection", str, dict[str, Any]], Awaitable[Any]]
 
 #: Methods that change what FieldDeck is allowed to do.  Refused outright on
 #: the restricted socket.
-AUTHORIZATION_METHODS = frozenset({"safety.arm", "safety.disarm", "safety.estop_clear"})
+#:
+#: ``safety.lease_renew`` is here because renewing extends a live hazard: a
+#: lease is the promise that a human-facing client is still watching, and an
+#: assistant renewing one on that client's behalf is the dead-man handle being
+#: held down by the thing it exists to be independent of.
+#:
+#: ``safety.lease_release`` is deliberately *not* here, for the same reason
+#: ``estop`` is available: releasing ends a hazard, and stopping is never the
+#: dangerous direction.
+AUTHORIZATION_METHODS = frozenset(
+    {"safety.arm", "safety.disarm", "safety.estop_clear", "safety.lease_renew"}
+)
 
 #: Requests one connection may have in flight at once. Requests are handled
 #: concurrently rather than one at a time, because a three-second CAN capture

@@ -225,9 +225,10 @@ and help you read what the bus is doing.
 It connects to a **different socket** than you do. On that socket:
 
 - Every request is stamped `source=claude`, in the audit log, forever.
-- `safety.arm`, `safety.disarm` and `safety.estop_clear` are refused **at the
-  transport**, before any handler sees them. Not by policy — by there being no
-  code path.
+- `safety.arm`, `safety.disarm`, `safety.estop_clear` and `safety.lease_renew`
+  are refused **at the transport**, before any handler sees them. Not by policy
+  — by there being no code path. Releasing a lease is still allowed, because
+  that ends a hazard.
 - Of the 29 tools exposed, none arms anything. `estop` is there: Claude can
   stop the bench, and cannot start it.
 - When the next useful step needs authority, the tool result says so and tells

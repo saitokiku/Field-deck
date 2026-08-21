@@ -42,9 +42,15 @@ does not get a say.
 
 ### Refused at the transport
 
-`safety.arm`, `safety.disarm` and `safety.estop_clear` are rejected on the
-restricted socket **before any handler sees the request**. Not by a policy check
-that could be misconfigured — by there being no path.
+`safety.arm`, `safety.disarm`, `safety.estop_clear` and `safety.lease_renew`
+are rejected on the restricted socket **before any handler sees the request**.
+Not by a policy check that could be misconfigured — by there being no path.
+
+`safety.lease_renew` is on that list because renewing *extends a live hazard*.
+A lease is the promise that a human-facing client is still watching; an
+assistant renewing one on that client's behalf is the dead-man handle being
+held down by the very thing it exists to be independent of. Releasing a lease
+is still allowed — that ends a hazard.
 
 Defence in depth behind that: `ClientSource.CLAUDE.may_create_grants` is
 `False`, so even if a request reached the safety manager it would be refused

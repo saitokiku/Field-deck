@@ -60,12 +60,49 @@ class LeaseManager:
         self._leases[lease.lease_id] = lease
         return lease
 
-    def renew(self, lease_id: str, *, ttl_s: float | None = None) -> OutputLease:
+    def renew(
+        self,
+        lease_id: str,
+        *,
+        ttl_s: float | None = None,
+        connection_id: int | None = None,
+    ) -> OutputLease:
+        """Pull the dead-man handle again.
+
+        Two restrictions, both learned the hard way:
+
+        **Only the holder may renew.**  A lease is a promise that *this* client
+        is still alive and still watching.  A second client renewing it turns
+        that promise into a statement about a third party, and a hung operator
+        whose rail is kept up by somebody else is precisely the failure the
+        lease exists to prevent.  ``connection_id=None`` skips the check, for
+        the daemon's own internal renewals.
+
+        **A renewal may not lengthen the interval.**  Renewing is "keep going
+        for another interval", not "change the interval": a client that could
+        renew for an hour has replaced its dead-man handle with a timer.  A
+        shorter renewal is fine, and a longer request is clamped rather than
+        refused -- the same way an over-long arm TTL is clamped by policy.
+        """
         lease = self._leases.get(lease_id)
         if lease is None or lease.released:
             raise LeaseError(
                 f"no active lease {lease_id}",
                 details={"lease_id": lease_id},
+                preserved="the device was left in whatever state it was already in",
+            )
+        if (
+            connection_id is not None
+            and lease.owner_connection is not None
+            and connection_id != lease.owner_connection
+        ):
+            raise LeaseError(
+                f"lease {lease_id} is held by another client and only its holder may renew it",
+                details={
+                    "lease_id": lease_id,
+                    "device_id": lease.device_id,
+                    "owner": str(lease.owner),
+                },
                 preserved="the device was left in whatever state it was already in",
             )
         now = Timestamp.now().monotonic_ns
@@ -74,8 +111,18 @@ class LeaseManager:
                 f"lease {lease_id} already expired; re-acquire it rather than renewing",
                 details={"lease_id": lease_id},
             )
-        extension = ttl_s if ttl_s is not None else lease.ttl_s
+        requested = ttl_s if ttl_s is not None else lease.ttl_s
+        if requested <= 0:
+            raise LeaseError(
+                "lease TTL must be positive",
+                details={"lease_id": lease_id, "ttl_s": requested},
+            )
+        extension = min(requested, lease.ttl_s)
         lease.expires_monotonic_ns = now + int(extension * 1e9)
+        # Kept in step with the deadline actually in force. Leaving it stale
+        # made the lease report a dead-man interval it was not honouring, and
+        # the HMI showed that number.
+        lease.ttl_s = extension
         return lease
 
     def release(self, lease_id: str) -> OutputLease | None:
