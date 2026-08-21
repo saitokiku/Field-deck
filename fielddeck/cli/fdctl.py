@@ -265,6 +265,10 @@ bench_app = typer.Typer(help="Bench instruments over SCPI.", no_args_is_help=Tru
 scpi_app = typer.Typer(help="Raw SCPI queries.", no_args_is_help=True)
 psu_app = typer.Typer(help="Programmable power supplies.", no_args_is_help=True)
 recipe_app = typer.Typer(help="Test recipes.", no_args_is_help=True)
+logic_app = typer.Typer(help="Logic analyzers and protocol decoding.", no_args_is_help=True)
+debug_app = typer.Typer(help="Debug probes and target control.", no_args_is_help=True)
+firmware_app = typer.Typer(help="Firmware files, inspected locally.", no_args_is_help=True)
+flash_app = typer.Typer(help="Reading and writing target flash.", no_args_is_help=True)
 
 app.add_typer(session_app, name="session")
 app.add_typer(estop_app, name="estop")
@@ -275,6 +279,10 @@ app.add_typer(bench_app, name="bench")
 app.add_typer(scpi_app, name="scpi")
 app.add_typer(psu_app, name="psu")
 app.add_typer(recipe_app, name="recipe")
+app.add_typer(logic_app, name="logic")
+app.add_typer(debug_app, name="debug")
+app.add_typer(firmware_app, name="firmware")
+app.add_typer(flash_app, name="flash")
 
 
 @app.callback(invoke_without_command=True)
@@ -2237,6 +2245,284 @@ def watch_command(
         _call(settings, poll)
     except KeyboardInterrupt:
         raise typer.Exit(0) from None
+
+
+# ---------------------------------------------------------------------------
+# Logic, debug, firmware and flash
+#
+# Thin wrappers over actions that were always reachable through `fdctl call`.
+# The escape hatch is not the same as support: `fdctl call flash.plan
+# tool=openocd operation=program ...` gives no tab completion, no help text
+# naming the permission, and no confirmation before something irreversible.
+# ---------------------------------------------------------------------------
+
+_LOGIC_KINDS = ("logic", "i2c", "spi")
+
+
+@logic_app.command("devices")
+def logic_devices(ctx: typer.Context, json_out: JsonFlag = False) -> None:
+    """Logic analyzers instrumentd can see."""
+    settings = _settings(ctx, json_out)
+    payload = _filtered_devices(settings, kinds=_LOGIC_KINDS)
+    settings.emitter.emit(payload, lambda: fmt.device_table(payload["devices"], payload["aliases"]))
+
+
+@logic_app.command("status")
+def logic_status(ctx: typer.Context, reference: DeviceArg, json_out: JsonFlag = False) -> None:
+    """Analyzer configuration and channel names."""
+    settings = _settings(ctx, json_out)
+    payload = _execute(settings, "logic.status", {"device": reference})
+    settings.emitter.emit(payload, lambda: fmt.kv_panel(reference, payload))
+
+
+@logic_app.command("capture")
+def logic_capture(
+    ctx: typer.Context,
+    reference: DeviceArg,
+    seconds: Annotated[float, typer.Option("--seconds", min=0.01, max=3600)] = 0.5,
+    samplerate: Annotated[str, typer.Option("--samplerate", help="e.g. 1m, 4m, 24m.")] = "1m",
+    label: Annotated[str, typer.Option("--label")] = "logic",
+    json_out: JsonFlag = False,
+) -> None:
+    """Record samples into an immutable capture in the active session."""
+    settings = _settings(ctx, json_out)
+    payload = _execute(
+        settings,
+        "logic.capture",
+        {"device": reference, "seconds": seconds, "samplerate": samplerate, "label": label},
+    )
+    settings.emitter.emit(payload, lambda: fmt.kv_panel("capture", payload))
+
+
+@logic_app.command("decode")
+def logic_decode(
+    ctx: typer.Context,
+    reference: DeviceArg,
+    path: Annotated[
+        str, typer.Option("--path", help="Capture inside the session, e.g. logic/logic-0001.sr.")
+    ],
+    decoder: Annotated[str, typer.Option("--decoder", help="i2c, spi, uart, ...")] = "uart",
+    json_out: JsonFlag = False,
+) -> None:
+    """Decode a stored capture into a derived artifact."""
+    settings = _settings(ctx, json_out)
+    payload = _execute(
+        settings,
+        "logic.decode",
+        {"device": reference, "artifact_path": path, "decoder": decoder},
+    )
+    settings.emitter.emit(payload, lambda: fmt.kv_panel("decode", payload))
+
+
+@debug_app.command("probes")
+def debug_probes(ctx: typer.Context, json_out: JsonFlag = False) -> None:
+    """Debug probes attached to this unit. Enumeration only; nothing is opened."""
+    settings = _settings(ctx, json_out)
+    payload = _execute(settings, "debug.probes")
+    settings.emitter.emit(payload, lambda: fmt.kv_panel("probes", payload))
+
+
+@debug_app.command("tools")
+def debug_tools(ctx: typer.Context, json_out: JsonFlag = False) -> None:
+    """Which programming tools are installed, and what each one is missing."""
+    settings = _settings(ctx, json_out)
+    payload = _execute(settings, "debug.tools")
+    settings.emitter.emit(payload, lambda: fmt.kv_panel("tools", payload))
+
+
+@debug_app.command("target")
+def debug_target(
+    ctx: typer.Context,
+    tool: Annotated[str, typer.Argument(help="openocd, pyocd, esptool or dfu-util.")],
+    target: Annotated[str, typer.Option("--target")] = "",
+    interface: Annotated[str, typer.Option("--interface")] = "stlink",
+    json_out: JsonFlag = False,
+) -> None:
+    """Ask the target who it is. QUERY: this drives the debug port."""
+    settings = _settings(ctx, json_out)
+    payload = _execute(
+        settings,
+        "debug.target_info",
+        _params(**{"tool": tool, "target": target or None, "interface": interface}),
+    )
+    settings.emitter.emit(payload, lambda: fmt.kv_panel(tool, payload))
+
+
+@debug_app.command("reset")
+def debug_reset(
+    ctx: typer.Context,
+    tool: Annotated[str, typer.Argument(help="openocd, pyocd, esptool or dfu-util.")],
+    target: Annotated[str, typer.Option("--target")] = "",
+    interface: Annotated[str, typer.Option("--interface")] = "stlink",
+    json_out: JsonFlag = False,
+) -> None:
+    """Reset the target. Requires CONTROL: it changes what the DUT is doing."""
+    settings = _settings(ctx, json_out)
+    payload = _execute(
+        settings,
+        "debug.reset",
+        _params(**{"tool": tool, "target": target or None, "interface": interface}),
+    )
+    settings.emitter.emit(payload, lambda: fmt.kv_panel(tool, payload))
+
+
+@firmware_app.command("inspect")
+def firmware_inspect(
+    ctx: typer.Context,
+    path: Annotated[str, typer.Argument(help="Firmware file, inside a permitted root.")],
+    json_out: JsonFlag = False,
+) -> None:
+    """Format, size, hashes and any symbols a firmware file carries.
+
+    PASSIVE: it reads a file. Nothing is sent to a target.
+    """
+    settings = _settings(ctx, json_out)
+    payload = _execute(settings, "firmware.inspect", {"path": path})
+    settings.emitter.emit(payload, lambda: fmt.kv_panel(path, payload))
+
+
+@flash_app.command("plan")
+def flash_plan(
+    ctx: typer.Context,
+    tool: Annotated[str, typer.Argument(help="openocd, pyocd, esptool or dfu-util.")],
+    operation: Annotated[
+        str, typer.Option("--operation", help="info, verify, reset, program or erase.")
+    ] = "info",
+    target: Annotated[str, typer.Option("--target")] = "",
+    interface: Annotated[str, typer.Option("--interface")] = "stlink",
+    firmware: Annotated[str, typer.Option("--firmware")] = "",
+    address: Annotated[str, typer.Option("--address")] = "",
+    json_out: JsonFlag = False,
+) -> None:
+    """Print the exact command that would run, and the firmware's SHA-256.
+
+    PASSIVE, and the thing to run before authorizing anything. Read the
+    argument vector; it is the one that would be executed, not a summary.
+    """
+    settings = _settings(ctx, json_out)
+    payload = _execute(
+        settings,
+        "flash.plan",
+        _params(
+            **{
+                "tool": tool,
+                "operation": operation,
+                "target": target or None,
+                "interface": interface,
+                "firmware_path": firmware or None,
+                "address": address or None,
+            }
+        ),
+    )
+    settings.emitter.emit(payload, lambda: fmt.kv_panel(f"{tool} {operation}", payload))
+
+
+@flash_app.command("verify")
+def flash_verify(
+    ctx: typer.Context,
+    tool: Annotated[str, typer.Argument(help="openocd or esptool.")],
+    firmware: Annotated[str, typer.Option("--firmware")],
+    target: Annotated[str, typer.Option("--target")] = "",
+    interface: Annotated[str, typer.Option("--interface")] = "stlink",
+    address: Annotated[str, typer.Option("--address")] = "",
+    json_out: JsonFlag = False,
+) -> None:
+    """Compare target flash against an image. QUERY: it reads, it does not write."""
+    settings = _settings(ctx, json_out)
+    payload = _execute(
+        settings,
+        "flash.verify",
+        _params(
+            **{
+                "tool": tool,
+                "target": target or None,
+                "interface": interface,
+                "firmware_path": firmware,
+                "address": address or None,
+            }
+        ),
+    )
+    settings.emitter.emit(payload, lambda: fmt.kv_panel(f"{tool} verify", payload))
+
+
+@flash_app.command("program")
+def flash_program(
+    ctx: typer.Context,
+    tool: Annotated[str, typer.Argument(help="openocd, pyocd, esptool or dfu-util.")],
+    firmware: Annotated[str, typer.Option("--firmware")],
+    target: Annotated[str, typer.Option("--target")] = "",
+    interface: Annotated[str, typer.Option("--interface")] = "stlink",
+    address: Annotated[str, typer.Option("--address")] = "",
+    json_out: JsonFlag = False,
+) -> None:
+    """Write firmware. Requires a FLASH grant.
+
+    Run ``fdctl flash plan`` first: it prints the exact command and the image's
+    SHA-256 without touching the target.
+    """
+    settings = _settings(ctx, json_out)
+    _require_confirmation(
+        settings,
+        word="FLASH",
+        title=f"programming {target or tool} with {firmware}",
+        lines=[
+            "This overwrites the target's firmware. There is no undo.",
+            "Run 'fdctl flash plan' first if you have not read the command.",
+        ],
+    )
+    payload = _execute(
+        settings,
+        "flash.program",
+        _params(
+            **{
+                "tool": tool,
+                "target": target or None,
+                "interface": interface,
+                "firmware_path": firmware,
+                "address": address or None,
+            }
+        ),
+    )
+    settings.emitter.emit(payload, lambda: fmt.kv_panel(f"{tool} program", payload))
+
+
+@flash_app.command("erase")
+def flash_erase(
+    ctx: typer.Context,
+    tool: Annotated[str, typer.Argument(help="openocd, pyocd or esptool.")],
+    target: Annotated[str, typer.Option("--target")] = "",
+    interface: Annotated[str, typer.Option("--interface")] = "stlink",
+    confirm: Annotated[str, typer.Option("--confirm", help="The target name, typed again.")] = "",
+    json_out: JsonFlag = False,
+) -> None:
+    """Mass-erase the target. Requires DESTRUCTIVE **and** --confirm.
+
+    Two independent acts, because there is no undo: the daemon refuses unless
+    ``--confirm`` names the target, and the prompt here is separate from that.
+    """
+    settings = _settings(ctx, json_out)
+    _require_confirmation(
+        settings,
+        word="ERASE",
+        title=f"mass-erasing {target or tool}",
+        lines=[
+            "Every byte of flash is destroyed, including any calibration data",
+            "stored there. On many ESP modules this cannot be regenerated.",
+        ],
+    )
+    payload = _execute(
+        settings,
+        "flash.erase",
+        _params(
+            **{
+                "tool": tool,
+                "target": target or None,
+                "interface": interface,
+                "confirm": confirm or target or None,
+            }
+        ),
+    )
+    settings.emitter.emit(payload, lambda: fmt.kv_panel(f"{tool} erase", payload))
 
 
 def main(argv: list[str] | None = None) -> int:

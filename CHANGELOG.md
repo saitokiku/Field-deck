@@ -65,7 +65,9 @@ before the frames stopped?"*
 with an AST-allowlist expression evaluator, `finally` blocks that run on
 failure, and no ability to arm anything.
 
-**Clients.** `fdctl` with `--json` on every command; a Textual HMI laid out for
+**Clients.** `fdctl` with `--json` on every command, covering CAN, serial,
+Modbus, bench/SCPI, PSU, logic, debug, firmware, flash, recipes, sessions and
+the conversion toolbox; a Textual HMI laid out for
 80×25 on a 480×320 panel; and an MCP server exposing 29 read-only tools, none of
 which can arm.
 
@@ -197,10 +199,8 @@ where the sharp edges are:
   instrument profiles cover supplies, DMMs and electronic loads. A scope is
   reachable through raw `scpi.query` and nothing more; there is no waveform
   capture, screenshot or trigger handling.
-- **`fdctl` has no `logic`, `debug`, `firmware` or `flash` command family.**
-  Every one of those actions is reachable — `fdctl call logic.capture`,
-  `fdctl call flash.plan` — but without the typed wrappers the other
-  subsystems have.
+- No typed CAN interface configuration: bringing a bus up remains an
+  `ip link` command, deliberately.
 
 [Unreleased]: https://github.com/saitokiku/field-deck/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/saitokiku/field-deck/releases/tag/v0.1.0
