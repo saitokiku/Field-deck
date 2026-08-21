@@ -100,6 +100,12 @@ failure, a hardened systemd unit, udev rules, and a supervised tmux kiosk.
 Found during pre-release verification, listed because they say something about
 where the sharp edges are:
 
+- **Three path-traversal bypasses in the external-tool guard.** Firmware paths
+  reach `run_tool` from recipes and from the MCP surface, and the guard skipped
+  any argument beginning with `-` and only inspected relative paths that
+  *began* with `../`. So `--firmware=/etc/shadow`, dfu-util's `-D/etc/shadow`
+  and `sub/../../../../etc/shadow` all passed, as did a path inside openocd's
+  composite `-c "program ... "` argument.
 - **A QUERY action could write firmware.** Every planner in
   `fielddeck/debug/flash.py` ended with an unconditional "and anything else is
   a program" return, so an operation a given tool did not implement silently

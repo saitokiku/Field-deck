@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -141,6 +142,52 @@ def _resolve(executable: str) -> str:
     return resolved
 
 
+#: A long option carrying its value inline, e.g. ``--firmware=/etc/shadow``.
+_INLINE_VALUE = re.compile(r"^--?[^=\s]+=(?P<value>.+)$", re.S)
+
+#: A short option with the value attached, e.g. dfu-util's ``-D/path/to.bin``.
+_ATTACHED_VALUE = re.compile(r"^-[A-Za-z](?P<value>[^-].*)$", re.S)
+
+
+def _path_candidates(arg: str) -> list[str]:
+    """Every substring of one argument that might be a path.
+
+    Checking the argument as a whole is not enough.  Tools take a path in at
+    least three shapes, and the original guard skipped anything beginning with
+    ``-``, so ``--firmware=/etc/shadow`` and dfu-util's ``-D/etc/shadow`` went
+    straight through.  openocd additionally passes a whole command line as one
+    argument (``-c "program /tmp/x.bin verify reset exit"``), so whitespace
+    inside an argument is split as well.
+    """
+    candidates = [arg]
+    for pattern in (_INLINE_VALUE, _ATTACHED_VALUE):
+        match = pattern.match(arg)
+        if match:
+            candidates.append(match.group("value"))
+    if any(ch.isspace() for ch in arg):
+        candidates.extend(token for token in arg.split() if token)
+    return candidates
+
+
+def _escapes_roots(candidate: str, resolved_roots: Sequence[Path]) -> bool:
+    """Is this string a path that lands outside every permitted root?
+
+    A *relative* path with no ``..`` component cannot escape, and openocd
+    genuinely needs those -- ``-f interface/stlink.cfg`` is resolved by openocd
+    against its own script directory, not by us.  A relative path that contains
+    ``..`` is a different matter: ``sub/../../../../etc/shadow`` used to pass,
+    because the old guard only looked at arguments that *began* with ``../``.
+    """
+    if "/" not in candidate and not candidate.startswith("~"):
+        return False
+    expanded = Path(candidate).expanduser()
+    traverses = ".." in expanded.parts
+    if not expanded.is_absolute() and not traverses and not candidate.startswith("~"):
+        return False
+    resolved = expanded.resolve()
+    return not any(resolved.is_relative_to(root) for root in resolved_roots)
+
+
 def _validate_paths(args: Sequence[str], allowed_roots: Sequence[Path] | None) -> None:
     """Refuse path arguments that escape the roots the caller allows.
 
@@ -152,17 +199,16 @@ def _validate_paths(args: Sequence[str], allowed_roots: Sequence[Path] | None) -
         return
     resolved_roots = [root.resolve() for root in allowed_roots]
     for arg in args:
-        if not arg or arg.startswith("-") or ("/" not in arg and not arg.startswith("~")):
+        if not arg:
             continue
-        candidate = Path(arg).expanduser()
-        if not candidate.is_absolute() and not arg.startswith(("./", "../", "~")):
-            continue
-        resolved = candidate.resolve()
-        if not any(resolved.is_relative_to(root) for root in resolved_roots):
+        for candidate in _path_candidates(arg):
+            if not _escapes_roots(candidate, resolved_roots):
+                continue
             raise ExternalToolError(
-                f"path argument {arg!r} is outside the permitted directories",
+                f"path argument {candidate!r} is outside the permitted directories",
                 details={
                     "argument": arg,
+                    "path": candidate,
                     "allowed_roots": [str(root) for root in resolved_roots],
                 },
                 preserved="the tool was not started",
