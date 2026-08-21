@@ -39,8 +39,17 @@ __all__ = [
     "encode_response",
 ]
 
-#: A single request larger than this is refused rather than buffered.  Bulk
-#: data belongs in a capture file, not in a control message.
+#: Ceiling on one protocol frame, in either direction.
+#:
+#: Both the server and the client pass this to asyncio as their stream limit,
+#: so it is the real limit rather than a documented one. asyncio's own default
+#: is 64 KiB, which is small enough that a CAN listen of a few hundred frames
+#: overran it — and the failure mode was the reader dying, not a typed error.
+#:
+#: A frame beyond this ceiling costs the connection: the daemon will not
+#: buffer an unbounded request in order to reply politely to it. Bulk data
+#: belongs in a capture file, and every action that can produce a lot of it
+#: has a bound (``duration_s``, ``max_frames``, ``max_bytes``) for that reason.
 MAX_LINE_BYTES = 4 * 1024 * 1024
 
 

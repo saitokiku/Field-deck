@@ -261,7 +261,10 @@ class RpcServer:
                 allow_authorization=allow_authorization,
             )
 
-        server = await asyncio.start_unix_server(on_client, path=str(path))
+        # asyncio's default stream limit is 64 KiB. Without raising it the
+        # documented MAX_LINE_BYTES is fiction and, worse, an oversized frame
+        # surfaces as a connection reset rather than a typed error.
+        server = await asyncio.start_unix_server(on_client, path=str(path), limit=MAX_LINE_BYTES)
         self._harden(path, group)
         _log.info(
             "listening",

@@ -21,6 +21,7 @@ from fielddeck.common.errors import FieldDeckError, TransportError, error_from_d
 from fielddeck.common.events import Event, EventType
 from fielddeck.common.models import ActionResult, ClientSource
 from fielddeck.common.paths import socket_path as default_socket_path
+from fielddeck.daemon.protocol import MAX_LINE_BYTES
 
 __all__ = ["InstrumentClient", "connect"]
 
@@ -51,7 +52,11 @@ class InstrumentClient:
     async def connect(self) -> InstrumentClient:
         try:
             self._reader, self._writer = await asyncio.wait_for(
-                asyncio.open_unix_connection(str(self.socket_path)), timeout=5.0
+                # Must match the server's limit. At asyncio's 64 KiB default a
+                # CAN listen of about eight hundred frames — under a second on
+                # a real bus — overran the buffer and killed the read loop.
+                asyncio.open_unix_connection(str(self.socket_path), limit=MAX_LINE_BYTES),
+                timeout=5.0,
             )
         except FileNotFoundError as exc:
             raise TransportError(
@@ -209,6 +214,20 @@ class InstrumentClient:
                     line = await self._reader.readuntil(b"\n")
                 except (asyncio.IncompleteReadError, ConnectionResetError):
                     break
+                except asyncio.LimitOverrunError as exc:
+                    # A single response larger than the protocol allows. Fail
+                    # every in-flight call with something actionable instead of
+                    # letting the reader die and every future call hang.
+                    self._fail_pending(
+                        TransportError(
+                            f"instrumentd sent a response larger than the "
+                            f"{MAX_LINE_BYTES} byte protocol limit; narrow the "
+                            "request (fewer frames, a shorter duration) or write "
+                            "it to a capture file instead",
+                            details={"limit": MAX_LINE_BYTES, "detail": str(exc)},
+                        )
+                    )
+                    break
                 if not line.strip():
                     continue
                 try:
@@ -228,9 +247,12 @@ class InstrumentClient:
         except asyncio.CancelledError:
             raise
         finally:
-            for future in self._pending.values():
-                if not future.done():
-                    future.set_exception(TransportError("instrumentd closed the connection"))
+            self._fail_pending(TransportError("instrumentd closed the connection"))
+
+    def _fail_pending(self, error: BaseException) -> None:
+        for future in self._pending.values():
+            if not future.done():
+                future.set_exception(error)
 
     def _deliver_event(self, message: dict[str, Any]) -> None:
         queue = self._subscriptions.get(message.get("subscription", ""))
