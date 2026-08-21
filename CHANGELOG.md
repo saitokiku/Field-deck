@@ -115,6 +115,12 @@ where the sharp edges are:
   Planners now refuse what they cannot do, and `DebugActions._execute` refuses
   any plan more dangerous than the permission the dispatcher granted — so the
   same bug in a future tool wrapper fails closed.
+- **A device that disappeared kept its output lease forever.** `discover()`
+  retired the device but never released the lease, so it stayed in the safety
+  snapshot and on the HMI banner, and no safe state could satisfy it —
+  `apply_safe_state` for an unregistered device returned an empty list without
+  a word. Losing a device while it holds an output lease is now CRITICAL: it
+  means something energised is no longer under FieldDeck's control.
 - **A safe state that failed was recorded as "safe state applied".** The
   timeline showed *"safe state applied to bench-psu"* at WARNING for a supply
   whose `safe_state()` had just timed out or raised. Failures are now CRITICAL,

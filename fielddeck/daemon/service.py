@@ -254,6 +254,7 @@ class InstrumentDaemon:
             if gone is not None:
                 with contextlib.suppress(Exception):
                     await gone.disconnect()
+                self._surrender_leases_for_lost_device(device_id)
                 removed.append(device_id)
                 self.bus.publish(
                     new_event(
@@ -266,6 +267,39 @@ class InstrumentDaemon:
         return added, removed
 
     # -- safety timer ------------------------------------------------------
+
+    def _surrender_leases_for_lost_device(self, device_id: str) -> None:
+        """Release leases held on a device that has gone away.
+
+        Without this the lease outlives the device: it stays in the safety
+        snapshot and on the HMI banner, no safe state can ever satisfy it
+        (``apply_safe_state`` finds no driver for it), and if the device
+        reappears with the same id the stale lease is still there.
+
+        The event is CRITICAL rather than a tidy-up note on purpose. A device
+        vanishing *while holding an output lease* means something that was
+        energised is no longer under FieldDeck's control -- an unplugged supply,
+        a USB reset, a crashed adapter. The rail may well still be live, and
+        FieldDeck can no longer turn it off. That is the operator's problem to
+        act on, not a housekeeping line.
+        """
+        for lease in self.safety.leases.for_device(device_id):
+            self.safety.leases.release(lease.lease_id)
+            self.bus.publish(
+                new_event(
+                    EventType.LEASE_RELEASED,
+                    severity=EventSeverity.CRITICAL,
+                    session_id=self.sessions.current_id,
+                    device_id=device_id,
+                    action=lease.action,
+                    message=(
+                        f"{device_id} disappeared while holding an output lease "
+                        f"({lease.lease_id}, {lease.action}). FieldDeck can no longer "
+                        "drive it to a safe state — check the hardware."
+                    ),
+                    payload=lease.model_dump(mode="json"),
+                )
+            )
 
     async def _safety_loop(self) -> None:
         """Reap expired grants and leases; drive safe state on lapse."""

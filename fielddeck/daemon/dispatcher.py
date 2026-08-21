@@ -701,6 +701,24 @@ class Dispatcher:
             if device_ids is None or driver.device_id in device_ids
         ]
         if not drivers:
+            if device_ids:
+                # The caller named devices and none of them are registered. It
+                # has already been told the bench is being made safe, so saying
+                # nothing here would let "safe state applied" stand for a device
+                # that was never touched.
+                _log.error(
+                    "safe state requested for unknown devices",
+                    extra={"devices": list(device_ids), "reason": reason},
+                )
+                return [
+                    {
+                        "device": device_id,
+                        "applied": False,
+                        "safe": False,
+                        "error": "device is not registered; it cannot be driven to a safe state",
+                    }
+                    for device_id in device_ids
+                ]
             return []
 
         # Bumped before the first await, so a handler that finishes *during*

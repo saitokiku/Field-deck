@@ -351,8 +351,15 @@ class OutputLease(StrictModel):
     created_monotonic_ns: int
     expires_monotonic_ns: int
     ttl_s: float
-    #: Action the daemon runs when the lease lapses, e.g. ``psu.output``
-    #: with ``{"enabled": false}``.
+    #: What this lease was sustaining, e.g. ``psu.output`` with
+    #: ``{"enabled": true}``, and the parameters that would undo it.
+    #:
+    #: Recorded for the audit trail, **not** executed. When a lease lapses the
+    #: daemon calls the driver's own :meth:`~fielddeck.drivers.base.Driver.
+    #: safe_state`, which safes the whole device rather than reversing one
+    #: action. That is deliberately the blunter instrument: a lapsed lease means
+    #: nobody is watching, and at that point "everything off" is a better answer
+    #: than "undo precisely the thing I remember doing".
     safe_action: str | None = None
     safe_params: dict[str, Any] = Field(default_factory=dict)
     released: bool = False
