@@ -22,7 +22,7 @@ from textual.containers import Grid
 from textual.widget import Widget
 from textual.widgets import Static
 
-from fielddeck.common.models import DeviceRole, TransportKind
+from fielddeck.common.models import DeviceDescriptor, DeviceRole, TransportKind
 from fielddeck.ui.screens import PanelScreen
 from fielddeck.ui.state import UiState
 from fielddeck.ui.widgets import GLYPH_ACTIVE, GLYPH_IDLE, GLYPH_OK, GLYPH_UNKNOWN, duration
@@ -65,7 +65,7 @@ class HomeScreen(PanelScreen):
         self.query_one("#home-summary", Static).update(_summary(state))
 
     def tile_pressed(self, key: str) -> None:
-        app = self.app
+        app = self.panel
         if key == "bus":
             app.go_discovery("bus")
         elif key == "logic":
@@ -133,7 +133,7 @@ def _summary(state: UiState) -> str:
         parts.append(f"{_short(serial)} {serial.metadata.get('baudrate', '?')}")
     psu = state.device_for(role=DeviceRole.PSU)
     if psu is not None:
-        parts.append(f"{_short(psu)} PSU")
+        parts.append(f"PSU {_short(psu)}")
     if not parts:
         parts.append("no interfaces - MENU then DISCOVER")
     session = state.session
@@ -143,7 +143,7 @@ def _summary(state: UiState) -> str:
     return f"{' | '.join(parts)}\n{session_text}"
 
 
-def _short(device: object) -> str:
+def _short(device: DeviceDescriptor) -> str:
     """A device's shortest honest name: the interface, not the whole path."""
-    name = getattr(device, "path", None) or getattr(device, "display_name", "?")
-    return str(name).rsplit("/", 1)[-1].rsplit("#", 1)[-1]
+    name = device.path or device.product or device.display_name
+    return name.rsplit("/", 1)[-1].rsplit("#", 1)[-1][:14]

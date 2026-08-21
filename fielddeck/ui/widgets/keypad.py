@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from textual.app import ComposeResult
-from textual.binding import Binding
+from textual.binding import Binding, BindingType
 from textual.containers import Grid, Horizontal, Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
@@ -73,7 +73,7 @@ class Keypad(Grid):
 class KeypadScreen(ModalScreen[float | None]):
     """Full-screen direct entry.  Returns the value, or None if cancelled."""
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "cancel", "Cancel", show=False),
         Binding("enter", "accept", "Accept", show=False),
         Binding("backspace", "backspace", "Delete", show=False),

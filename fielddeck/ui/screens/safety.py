@@ -74,15 +74,21 @@ class SafetyScreen(PanelScreen):
             for level in ARMABLE:
                 yield Tile(
                     f"arm-{level}",
-                    str(level)[:9],
+                    str(level),
                     "",
                     classes="action-tile",
                     id=f"arm-{level.lower()}",
                 )
         with Horizontal(id="safety-bottom"):
-            yield Tile("estop", "E-STOP", "stop everything now", classes="estop-tile")
-            yield Tile("disarm", "DISARM", "revoke all grants", classes="action-tile")
-            yield Tile("clear", "CLEAR", "acknowledge estop", classes="action-tile")
+            yield Tile(
+                "estop", "E-STOP", "stop everything now", classes="estop-tile", id="safety-estop"
+            )
+            yield Tile(
+                "disarm", "DISARM", "revoke all grants", classes="action-tile", id="safety-disarm"
+            )
+            yield Tile(
+                "clear", "CLEAR", "acknowledge estop", classes="action-tile", id="safety-clear"
+            )
 
     # -- rendering ---------------------------------------------------------
 
@@ -176,6 +182,8 @@ def _state_block(state: UiState) -> str:
         )
     if not grants:
         lines.append("  no grants")
+    if safety.stale:
+        lines.append("  (last known state; the daemon is unreachable - see MENU)")
     for lease in safety.leases[:2]:
         lines.append(
             f"  {GLYPH_ACTIVE} lease {lease.action} on {lease.device_id}"

@@ -18,14 +18,14 @@ to press that" is the failure mode the rule exists to prevent.
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from rich.text import Text
 from textual.app import ComposeResult, RenderResult
-from textual.binding import Binding
+from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
-from textual.screen import ModalScreen
+from textual.screen import ModalScreen, Screen
 from textual.widget import Widget
 from textual.widgets import Digits, Static
 
@@ -42,7 +42,7 @@ class Tile(Widget):
 
     can_focus = True
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding("enter,space", "press", "Select", show=False),
     ]
 
@@ -154,7 +154,9 @@ class NoticeScreen(ModalScreen[None]):
     unimplemented panel, or the assistant's short-form observations.
     """
 
-    BINDINGS: ClassVar[list[Binding]] = [Binding("escape,enter,space", "close", "Back", show=False)]
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape,enter,space", "close", "Back", show=False)
+    ]
 
     def __init__(self, title: str, lines: list[str]) -> None:
         super().__init__()
@@ -182,7 +184,7 @@ class ConfirmScreen(ModalScreen[bool]):
     commits.  A tap has to land on the confirm tile specifically.
     """
 
-    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "cancel", "Cancel", show=False)]
+    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "cancel", "Cancel", show=False)]
 
     def __init__(
         self,
@@ -224,10 +226,11 @@ async def confirm(
     confirm_label: str = "CONFIRM",
 ) -> bool:
     """Ask for the second action.  Must be awaited from a worker, not a callback."""
-    return bool(
-        await widget.app.push_screen_wait(ConfirmScreen(title, lines, confirm_label=confirm_label))
-    )
+    screen: Screen[Any] = ConfirmScreen(title, lines, confirm_label=confirm_label)
+    return bool(await widget.app.push_screen_wait(screen))
 
 
 async def notice(widget: Widget, title: str, lines: list[str]) -> None:
-    await widget.app.push_screen_wait(NoticeScreen(title, lines))
+    """Show a full-screen message and wait for the operator to dismiss it."""
+    screen: Screen[Any] = NoticeScreen(title, lines)
+    await widget.app.push_screen_wait(screen)

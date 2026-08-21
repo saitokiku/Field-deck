@@ -85,6 +85,23 @@ RECONNECT_MAX_S = 5.0
 #: the timeline on disk is the record, this is just what fits on a panel.
 EVENT_HISTORY = 200
 
+#: Actions the panel runs on a timer to keep itself current.  They are real
+#: timeline events and stay in the session record; they are just not what an
+#: operator means by "what happened", so the panel does not spend eight rows of
+#: its event view on its own heartbeat.
+ROUTINE_ACTIONS: frozenset[str] = frozenset(
+    {
+        "system.status",
+        "system.limits",
+        "device.list",
+        "can.status",
+        "can.stats",
+        "serial.monitor",
+        "psu.status",
+        "bench.status",
+    }
+)
+
 #: Renew an output lease three times inside its TTL, matching ``fdctl``.  Once
 #: would make a single scheduling hiccup fatal to a rail that is meant to stay
 #: up; three never lengthens the dead-man interval.
@@ -225,6 +242,39 @@ class FaultView:
         return max(0.0, (monotonic_ns() - self.monotonic_ns) / 1e9)
 
 
+def _is_routine(event: Event) -> bool:
+    """Is this event the panel keeping itself up to date?"""
+    return event.action in ROUTINE_ACTIONS and event.type in {
+        EventType.ACTION_REQUESTED,
+        EventType.ACTION_STARTED,
+        EventType.ACTION_COMPLETED,
+    }
+
+
+#: A refusal is the safety model working, not a fault.  ``ACTION_DENIED`` and a
+#: rejected limit are reported on the annunciator where the operator asked for
+#: them, and they must not light the panel's fault lamp — a lamp that comes on
+#: every time somebody forgets to arm is a lamp people learn to ignore.
+_NOT_FAULTS: frozenset[EventType] = frozenset(
+    {EventType.ACTION_DENIED, EventType.ACTION_FAILED, EventType.LIMIT_REJECTED}
+)
+
+_ALWAYS_FAULTS: frozenset[EventType] = frozenset(
+    {
+        EventType.DEVICE_FAULT,
+        EventType.CAPTURE_OVERFLOW,
+        EventType.STORAGE_LOW,
+        EventType.CLOCK_STEPPED,
+    }
+)
+
+
+def _is_fault(event: Event) -> bool:
+    if event.type in _ALWAYS_FAULTS or event.severity is EventSeverity.CRITICAL:
+        return True
+    return event.severity is EventSeverity.ERROR and event.type not in _NOT_FAULTS
+
+
 def parse_payload(text: str, *, as_hex: bool) -> tuple[bytes | None, str]:
     """Turn what the operator typed into the bytes that will go on the wire.
 
@@ -287,6 +337,7 @@ class UiState:
         self.denied_permissions: tuple[str, ...] = ()
         self.fault: FaultView | None = None
         self.last_outcome: Outcome | None = None
+        self.last_outcome_monotonic_ns = 0
         self.events: deque[Event] = deque(maxlen=EVENT_HISTORY)
 
         #: Bumped on every change worth repainting.  Widgets compare it so a
@@ -678,16 +729,35 @@ class UiState:
         self._want_devices = True
         self._wake.set()
 
+    def retry_now(self) -> None:
+        """Cut short the reconnect backoff.
+
+        The supervisor already retries on its own; this exists so an operator
+        who has just restarted the service does not have to watch a five second
+        timer they cannot see.
+        """
+        self._wake.set()
+
     def clear_fault(self) -> None:
         """Operator acknowledgement.  The event stays on the timeline."""
         self.fault = None
         self._touch()
 
     def recent_events(
-        self, limit: int = 20, types: Iterable[EventType] | None = None
+        self,
+        limit: int = 20,
+        types: Iterable[EventType] | None = None,
+        *,
+        include_routine: bool = False,
     ) -> list[Event]:
+        """Newest first.  The panel's own polling is hidden unless asked for."""
         wanted = set(types) if types else None
-        chosen = [event for event in self.events if wanted is None or event.type in wanted]
+        chosen = [
+            event
+            for event in self.events
+            if (wanted is None or event.type in wanted)
+            and (include_routine or wanted is not None or not _is_routine(event))
+        ]
         return chosen[-limit:][::-1]
 
     # -- background --------------------------------------------------------
@@ -880,12 +950,7 @@ class UiState:
             payload_id = str(event.payload.get("lease_id") or "")
             if payload_id and payload_id == self._held_lease[0]:
                 self._held_lease = None
-        if event.severity in {EventSeverity.ERROR, EventSeverity.CRITICAL} or event.type in {
-            EventType.DEVICE_FAULT,
-            EventType.CAPTURE_OVERFLOW,
-            EventType.STORAGE_LOW,
-            EventType.LIMIT_REJECTED,
-        }:
+        if _is_fault(event):
             self.fault = FaultView(
                 message=event.message or str(event.type),
                 device_id=event.device_id,
@@ -922,8 +987,14 @@ class UiState:
     def _record(self, outcome: Outcome, remember: bool) -> Outcome:
         if remember:
             self.last_outcome = outcome
+            self.last_outcome_monotonic_ns = monotonic_ns()
             self._touch()
         return outcome
+
+    def outcome_age_s(self) -> float:
+        if self.last_outcome is None:
+            return 0.0
+        return max(0.0, (monotonic_ns() - self.last_outcome_monotonic_ns) / 1e9)
 
     def _note_error(self, exc: FieldDeckError) -> None:
         if isinstance(exc, TransportError):

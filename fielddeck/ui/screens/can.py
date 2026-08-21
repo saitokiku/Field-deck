@@ -128,9 +128,9 @@ class CanScreen(PanelScreen):
             f"LOAD {stats.get('bus_load_percent', 0)}%   IDS {len(stats.get('ids') or [])}"
         )
         self.query_one("#can-table", Static).update(self._table())
-        self.query_one("#can-tx", Static).update(
-            _tx_band(state, mode, device.id if device else None)
-        )
+        band = self.query_one("#can-tx", Static)
+        band.update(_tx_band(state, mode, device.id if device else None))
+        band.set_classes("unlocked" if not mode.lower().startswith("listen") else "")
 
     def _table(self) -> str:
         if self._error:

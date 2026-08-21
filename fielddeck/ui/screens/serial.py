@@ -14,8 +14,8 @@ a send or a capture happens.
 
 Arrival timing shown under the lines is computed here from the timestamps the
 daemon already returned, purely as a display aid.  The authoritative framing
-and CRC analysis is ``tools.identify``, one tap away on ANALYZE, and it is the
-one whose numbers belong in a report.
+and CRC analysis is ``tools.identify_protocol``, one tap away on ANALYZE, and
+it is the one whose numbers belong in a report.
 """
 
 from __future__ import annotations
@@ -72,11 +72,15 @@ class SerialScreen(PanelScreen):
         yield Static("", id="serial-analysis", markup=False)
         yield Input(placeholder="payload for SEND", id="serial-payload")
         with Horizontal(id="serial-actions"):
-            yield Tile("view-ASCII", "ASCII", "text", classes="action-tile")
-            yield Tile("view-HEX", "HEX", "bytes", classes="action-tile")
-            yield Tile("view-HEX+ASCII", "BOTH", "hex+text", classes="action-tile")
-            yield Tile("analyze", "ANALYZE", "framing/CRC", classes="action-tile")
-            yield Tile("send", "SEND", "needs CONTROL", classes="action-tile")
+            yield Tile("view-ASCII", "ASCII", "text", classes="action-tile", id="serial-ascii")
+            yield Tile("view-HEX", "HEX", "bytes", classes="action-tile", id="serial-hex")
+            yield Tile(
+                "view-HEX+ASCII", "BOTH", "hex+text", classes="action-tile", id="serial-both"
+            )
+            yield Tile(
+                "analyze", "ANALYZE", "framing/CRC", classes="action-tile", id="serial-analyze"
+            )
+            yield Tile("send", "SEND", "needs CONTROL", classes="action-tile", id="serial-send")
 
     def on_mount(self) -> None:
         super().on_mount()
@@ -170,7 +174,7 @@ class SerialScreen(PanelScreen):
             self._analysis = "nothing captured yet to analyse"
             return
         outcome = await self.state.run(
-            "tools.identify", {"hex": data.hex(), "limit": 3}, timeout_s=30.0
+            "tools.identify_protocol", {"hex": data.hex(), "limit": 3}, timeout_s=30.0
         )
         if not outcome.ok:
             self._analysis = outcome.summary()
@@ -234,14 +238,25 @@ def _ascii(data: bytes, limit: int) -> str:
 
 
 def _timing(chunks: Iterable[tuple[int, bytes]]) -> str:
-    """Inter-arrival period of the buffered frames: a display aid, not evidence."""
+    """Inter-arrival period of the buffered frames: a display aid, not evidence.
+
+    The gaps between one monitoring window and the next are seams in the
+    sample, not silences on the wire, and they inflate a naive standard
+    deviation into nonsense.  Anything more than three times the median gap is
+    treated as a seam and left out, which is why this is labelled a display aid
+    and ``tools.analyze_bytes`` is what belongs in a report.
+    """
     stamps = [stamp for stamp, _data in chunks]
-    if len(stamps) < 3:
+    if len(stamps) < 4:
         return "Pattern: not enough frames yet    CRC: tap ANALYZE"
     deltas = [(later - earlier) / 1e6 for earlier, later in pairwise(stamps)]
-    mean = statistics.fmean(deltas)
-    spread = statistics.pstdev(deltas)
+    median = statistics.median(deltas)
+    kept = [delta for delta in deltas if delta <= median * 3] or deltas
+    mean = statistics.fmean(kept)
+    spread = statistics.pstdev(kept)
+    seams = len(deltas) - len(kept)
     return (
-        f"Pattern: {mean:.1f} ms +/- {spread:.1f} ms over {len(deltas)} gaps (display aid)\n"
-        f"CRC candidate: tap ANALYZE for tools.identify"
+        f"Pattern: {mean:.1f} ms +/- {spread:.1f} ms over {len(kept)} gaps "
+        f"({seams} sample seam(s) dropped)\n"
+        "CRC candidate: tap ANALYZE for tools.identify_protocol"
     )

@@ -24,10 +24,10 @@ can be imported by any of them without a cycle.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from textual.app import ComposeResult
-from textual.binding import Binding
+from textual.binding import Binding, BindingType
 from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widget import Widget
@@ -42,6 +42,11 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from fielddeck.ui.app import FieldDeckApp
 
 __all__ = ["PanelScreen", "screen_map"]
+
+#: How long the annunciator holds the last result before falling back to the
+#: screen's own hint.
+OUTCOME_FADE_S = 20.0
+OUTCOME_HOLD_S = 90.0
 
 #: Repaints per second.  Fast enough that a countdown looks live, slow enough
 #: that a busy bus cannot turn the panel into the most expensive thing on the
@@ -60,7 +65,7 @@ class PanelScreen(Screen[None]):
     #: :data:`~fielddeck.ui.widgets.status_bar.SUB_NAV`.
     NAV: ClassVar[tuple[tuple[str, str], ...]] = HOME_NAV
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "back", "Back", show=False),
         Binding("h", "nav('home')", "Home", show=False),
         Binding("s", "nav('session')", "Session", show=False),
@@ -72,8 +77,12 @@ class PanelScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         yield StatusBar()
-        yield NavBar(self.NAV)
-        yield Static("", id="annunciator")
+        # Annunciator and navigation share one docked container: two siblings
+        # docked to the same edge overlap, and the row they fight over is the
+        # bottom of the navigation tiles.
+        with Vertical(id="chrome-bottom"):
+            yield Static("", id="annunciator")
+            yield NavBar(self.NAV)
         with Vertical(id="body"):
             yield from self.content()
 
@@ -84,15 +93,24 @@ class PanelScreen(Screen[None]):
     # -- state -------------------------------------------------------------
 
     @property
+    def panel(self) -> FieldDeckApp:
+        """The application, typed.  Screens never import it at runtime."""
+        return cast("FieldDeckApp", self.app)
+
+    @property
     def state(self) -> UiState:
-        app: FieldDeckApp = self.app  # type: ignore[assignment]
-        return app.state
+        return self.panel.state
 
     def on_mount(self) -> None:
         self.set_interval(1 / REFRESH_HZ, self._tick)
         self._tick()
 
     def _tick(self) -> None:
+        # A screen further down the stack keeps its timers but not the display.
+        # Skipping its repaint is the difference between one screen refreshing
+        # at 10 Hz and three of them doing it.
+        if self.app.screen is not self:
+            return
         state = self.state
         self.query_one(StatusBar).refresh_from(state)
         self.query_one(NavBar).refresh_from(state)
@@ -103,11 +121,19 @@ class PanelScreen(Screen[None]):
         """Redraw the middle from a state snapshot.  Called at :data:`REFRESH_HZ`."""
 
     def _annunciator(self, state: UiState) -> str:
+        """Two lines: what the daemon said, and what survived it.
+
+        Wrapped rather than truncated, because the sentence that gets cut off a
+        refusal is always the half that says how to fix it.
+        """
         outcome = state.last_outcome
-        if outcome is None:
+        # Successes fade; refusals and failures stay long enough to be read by
+        # somebody who looked away at the wrong moment.
+        expiry = OUTCOME_FADE_S if outcome is not None and outcome.ok else OUTCOME_HOLD_S
+        if outcome is None or state.outcome_age_s() > expiry:
             return self.hint
         glyph = GLYPH_OK if outcome.ok else (GLYPH_WARNING if outcome.refused else GLYPH_FAULT)
-        return f"{glyph} {outcome.summary()}"
+        return _wrap(f"{glyph} {outcome.summary()}", width=79, lines=2)
 
     # -- gestures ----------------------------------------------------------
 
@@ -136,7 +162,7 @@ class PanelScreen(Screen[None]):
     # -- navigation --------------------------------------------------------
 
     def action_nav(self, key: str) -> None:
-        app: FieldDeckApp = self.app  # type: ignore[assignment]
+        app = self.panel
         if key == "rec":
             self.act(app.state.toggle_recording(name=app.default_session_name()))
             return
@@ -153,8 +179,23 @@ class PanelScreen(Screen[None]):
             app.go(target)
 
     def action_back(self) -> None:
-        app: FieldDeckApp = self.app  # type: ignore[assignment]
-        app.back()
+        self.panel.back()
+
+
+def _wrap(text: str, *, width: int, lines: int) -> str:
+    """Fold one sentence into a fixed number of rows, marking any loss."""
+    words = text.split()
+    rows: list[str] = [""]
+    for word in words:
+        candidate = f"{rows[-1]} {word}".strip()
+        if len(candidate) <= width:
+            rows[-1] = candidate
+        elif len(rows) < lines:
+            rows.append(word[:width])
+        else:
+            rows[-1] = f"{rows[-1][: width - 1]}~"
+            break
+    return "\n".join(rows)
 
 
 def screen_map() -> dict[str, Callable[[], PanelScreen]]:

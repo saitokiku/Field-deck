@@ -27,6 +27,7 @@ from fielddeck.common.models import DeviceDescriptor, DeviceRole, TransportKind
 from fielddeck.ui.screens import PanelScreen
 from fielddeck.ui.state import UiState
 from fielddeck.ui.widgets import GLYPH_WARNING, device_glyph
+from fielddeck.ui.widgets.status_bar import SUB_NAV
 from fielddeck.ui.widgets.tiles import Tile, notice
 
 __all__ = ["DiscoveryScreen"]
@@ -45,10 +46,16 @@ PAGE_SIZE = 4
 class DiscoveryScreen(PanelScreen):
     screen_name: ClassVar[str] = "discovery"
     hint: ClassVar[str] = "Tap a device to open it. RESCAN enumerates; it never transmits."
+    NAV: ClassVar[tuple[tuple[str, str], ...]] = SUB_NAV
 
     def __init__(self) -> None:
         super().__init__()
         self.filter_key: str | None = None
+        self._page = 0
+
+    def set_filter(self, filter_key: str | None) -> None:
+        """Point the list at one family of transports, from the home grid."""
+        self.filter_key = filter_key
         self._page = 0
 
     def content(self) -> Iterable[Widget]:
@@ -57,21 +64,21 @@ class DiscoveryScreen(PanelScreen):
             for index in range(PAGE_SIZE):
                 yield Tile(f"dev-{index}", "", classes="device-tile", id=f"device-{index}")
         with Horizontal(id="discovery-actions"):
-            yield Tile("rescan", "RESCAN", "enumerate", classes="action-tile")
-            yield Tile("page", "PAGE", "next four", classes="action-tile")
-            yield Tile("all", "ALL", "clear filter", classes="action-tile")
-            yield Tile("detail", "DETAIL", "first device", classes="action-tile")
+            yield Tile("rescan", "RESCAN", "enumerate", classes="action-tile", id="disc-rescan")
+            yield Tile("page", "PAGE", "next four", classes="action-tile", id="disc-page")
+            yield Tile("all", "ALL", "clear filter", classes="action-tile", id="disc-all")
+            yield Tile("detail", "DETAIL", "first device", classes="action-tile", id="disc-detail")
 
     # -- rendering ---------------------------------------------------------
 
-    def visible(self, state: UiState) -> tuple[DeviceDescriptor, ...]:
+    def visible_devices(self, state: UiState) -> tuple[DeviceDescriptor, ...]:
         kinds = FILTERS.get(self.filter_key or "", ())
         if not kinds:
             return state.devices
         return tuple(device for device in state.devices if device.kind in kinds)
 
     def render_state(self, state: UiState) -> None:
-        devices = self.visible(state)
+        devices = self.visible_devices(state)
         pages = max(1, math.ceil(len(devices) / PAGE_SIZE))
         self._page %= pages
         window = devices[self._page * PAGE_SIZE : self._page * PAGE_SIZE + PAGE_SIZE]
@@ -115,7 +122,7 @@ class DiscoveryScreen(PanelScreen):
             self._open(int(key.removeprefix("dev-")))
 
     def _device_at(self, index: int) -> DeviceDescriptor | None:
-        devices = self.visible(self.state)
+        devices = self.visible_devices(self.state)
         position = self._page * PAGE_SIZE + index
         return devices[position] if position < len(devices) else None
 
@@ -135,7 +142,7 @@ class DiscoveryScreen(PanelScreen):
         if target is None:
             self.run_worker(self._detail(index), exclusive=True, group="gesture")
             return
-        self.app.drill(target)
+        self.panel.drill(target)
 
     async def _detail(self, index: int) -> None:
         device = self._device_at(index)

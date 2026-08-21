@@ -1,0 +1,436 @@
+/* FieldDeck panel stylesheet.
+ *
+ * Sized for one target and one target only: 80 columns by 25 rows on a 480x320
+ * panel.  The row budget is fixed and every screen has to live inside it:
+ *
+ *     2  status chrome (safety, recording, fault, session)
+ *    19  screen body
+ *     1  annunciator (what the daemon said about the last gesture)
+ *     3  navigation tiles
+ *
+ * Controls are at least 15 columns by 3 rows, which is the ~90x45 physical
+ * pixels a fingertip needs at this font size.  Colour is never load-bearing:
+ * every state that matters is also a word, a glyph, or reverse video, so the
+ * panel survives a monochrome LCD and a washed-out photograph of the bench.
+ */
+
+Screen {
+    layout: vertical;
+    background: $background;
+    color: $foreground;
+}
+
+/* --- chrome ------------------------------------------------------------ */
+
+#status-bar {
+    dock: top;
+    height: 2;
+    width: 100%;
+}
+
+#chrome-top {
+    height: 1;
+    width: 100%;
+    background: $panel;
+    color: $foreground;
+    text-style: bold;
+}
+
+#chrome-alert {
+    height: 1;
+    width: 100%;
+    background: $surface;
+}
+
+/* Reverse video, not colour: an emergency stop has to be unmissable on a
+ * monochrome screen and in a photograph. */
+#chrome-alert.estop {
+    background: $error;
+    color: $foreground;
+    text-style: bold reverse;
+}
+
+#chrome-alert.offline {
+    background: $surface;
+    color: $warning;
+    text-style: bold;
+}
+
+#chrome-alert.armed {
+    background: $warning-muted;
+    color: $foreground;
+    text-style: bold;
+}
+
+#chrome-alert.warn {
+    color: $warning;
+}
+
+#chrome-alert.safe {
+    color: $text-muted;
+}
+
+/* Annunciator and navigation in one docked block: five rows, always there. */
+#chrome-bottom {
+    dock: bottom;
+    height: 5;
+    width: 100%;
+}
+
+#annunciator {
+    height: 2;
+    width: 100%;
+    background: $surface;
+    color: $text-muted;
+}
+
+#nav-bar {
+    height: 3;
+    width: 100%;
+}
+
+#body {
+    height: 1fr;
+    width: 100%;
+}
+
+/* --- tiles ------------------------------------------------------------- */
+
+Tile {
+    border: solid $primary;
+    text-align: center;
+    content-align: center middle;
+    color: $foreground;
+}
+
+/* Focus is reverse video so the keyboard position is visible without colour. */
+Tile:focus {
+    border: solid $accent;
+    text-style: reverse;
+}
+
+Tile:disabled {
+    border: solid $surface;
+    color: $text-disabled;
+}
+
+.nav-tile {
+    width: 1fr;
+    height: 3;
+}
+
+.action-tile {
+    width: 1fr;
+    height: 3;
+}
+
+.estop-tile {
+    width: 2fr;
+    height: 100%;
+    border: heavy $error;
+    text-style: bold;
+}
+
+/* --- home -------------------------------------------------------------- */
+
+#home-grid {
+    layout: grid;
+    grid-size: 3 2;
+    grid-gutter: 0 1;
+    height: 1fr;
+    width: 100%;
+}
+
+.home-tile {
+    width: 100%;
+    height: 100%;
+    border: round $primary;
+}
+
+#home-summary {
+    height: 2;
+    width: 100%;
+    color: $text-muted;
+}
+
+/* --- discovery --------------------------------------------------------- */
+
+#discovery-head {
+    height: 1;
+    text-style: bold;
+}
+
+#discovery-grid {
+    layout: grid;
+    grid-size: 2 2;
+    grid-gutter: 0 1;
+    height: 1fr;
+}
+
+.device-tile {
+    width: 100%;
+    height: 100%;
+    border: round $primary;
+    text-align: left;
+    content-align: left middle;
+}
+
+#discovery-actions {
+    height: 3;
+    dock: bottom;
+}
+
+/* --- CAN --------------------------------------------------------------- */
+
+#can-head {
+    height: 2;
+    text-style: bold;
+}
+
+#can-table {
+    height: 1fr;
+}
+
+/* The transmit band is the safety-critical part of this screen: bold always,
+ * reversed when the interface has left listen-only. */
+#can-tx {
+    height: 2;
+    text-style: bold;
+}
+
+#can-tx.unlocked {
+    background: $warning-muted;
+    text-style: bold reverse;
+}
+
+#can-actions {
+    height: 3;
+    dock: bottom;
+}
+
+/* --- serial ------------------------------------------------------------ */
+
+#serial-head {
+    height: 2;
+    text-style: bold;
+}
+
+#serial-lines {
+    height: 1fr;
+}
+
+#serial-analysis {
+    height: 2;
+    color: $text-muted;
+}
+
+#serial-payload, #session-text, #tools-input {
+    height: 1;
+    border: none;
+    padding: 0;
+    background: $boost;
+}
+
+#serial-payload:focus, #session-text:focus, #tools-input:focus {
+    text-style: reverse;
+}
+
+#serial-actions {
+    height: 3;
+    dock: bottom;
+}
+
+/* --- bench ------------------------------------------------------------- */
+
+#bench-head {
+    height: 1;
+    text-style: bold;
+}
+
+#bench-readouts {
+    height: 5;
+}
+
+.readout {
+    width: 1fr;
+    height: 5;
+}
+
+.readout-caption {
+    height: 1;
+    color: $text-muted;
+}
+
+.readout-value {
+    height: 3;
+    color: $foreground;
+}
+
+.readout-note {
+    height: 1;
+    color: $text-muted;
+}
+
+#bench-auth {
+    height: 2;
+    text-style: bold;
+}
+
+#bench-actions {
+    height: 3;
+    dock: bottom;
+}
+
+/* --- numeric entry ----------------------------------------------------- */
+
+.numeric-field {
+    height: 3;
+    width: 100%;
+}
+
+.step-tile {
+    width: 15;
+    height: 3;
+}
+
+.step-tile.wide {
+    width: 15;
+}
+
+.numeric-value {
+    width: 1fr;
+    height: 3;
+    content-align: center middle;
+    text-align: center;
+    text-style: bold;
+    border: solid $surface;
+}
+
+#keypad-panel {
+    width: 100%;
+    height: 100%;
+    background: $background;
+}
+
+#keypad-title {
+    height: 1;
+    text-style: bold;
+}
+
+#keypad-display {
+    height: 3;
+    content-align: center middle;
+    text-align: center;
+    text-style: bold;
+    border: solid $primary;
+}
+
+#keypad-hint {
+    height: 1;
+    color: $text-muted;
+}
+
+#keypad-grid {
+    layout: grid;
+    grid-size: 4 4;
+    height: 1fr;
+}
+
+.keypad-key {
+    width: 100%;
+    height: 100%;
+}
+
+/* --- safety ------------------------------------------------------------ */
+
+#safety-state {
+    height: 5;
+}
+
+#safety-classes {
+    height: 3;
+}
+
+#safety-bottom {
+    height: 1fr;
+}
+
+/* --- tools ------------------------------------------------------------- */
+
+#tools-result {
+    height: 7;
+    color: $foreground;
+}
+
+#tools-grid {
+    layout: grid;
+    grid-size: 4 3;
+    height: 1fr;
+}
+
+.tool-tile {
+    width: 100%;
+    height: 100%;
+}
+
+/* --- session and system ------------------------------------------------ */
+
+#session-head {
+    height: 3;
+    text-style: bold;
+}
+
+#session-events {
+    height: 1fr;
+    color: $text-muted;
+}
+
+#session-actions, #system-actions {
+    height: 3;
+    dock: bottom;
+}
+
+#system-body {
+    height: 1fr;
+}
+
+/* --- modals ------------------------------------------------------------ */
+
+#confirm, #notice {
+    width: 100%;
+    height: 100%;
+    background: $background;
+}
+
+#confirm-title, #notice-title {
+    height: 2;
+    width: 100%;
+    text-style: bold reverse;
+    content-align: center middle;
+    text-align: center;
+}
+
+#confirm-body, #notice-body {
+    height: 1fr;
+    padding: 1 2;
+}
+
+#confirm-actions {
+    height: 5;
+}
+
+#confirm-no, #confirm-yes {
+    width: 1fr;
+    height: 5;
+    border: heavy $primary;
+}
+
+#confirm-yes {
+    border: heavy $error;
+    text-style: bold;
+}
+
+#notice-close {
+    height: 3;
+    width: 100%;
+}

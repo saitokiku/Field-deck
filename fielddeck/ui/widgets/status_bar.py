@@ -30,6 +30,7 @@ from fielddeck.ui.widgets import (
     GLYPH_FAULT,
     GLYPH_IDLE,
     GLYPH_OK,
+    GLYPH_UNKNOWN,
     GLYPH_WARNING,
     duration,
 )
@@ -125,16 +126,24 @@ def _top_line(state: UiState) -> str:
         word = "LINK?"
     else:
         word = safety.state
-    recording = state.session is not None
     session = state.session.name if state.session else "--"
     fault = f"{GLYPH_FAULT} FAULT" if state.fault else f"{GLYPH_OK} OK"
     link = f"{GLYPH_OK} DAEMON" if state.link.connected else f"{GLYPH_FAULT} NO DAEMON"
     sim = " SIM" if (state.system and state.system.simulated) else ""
+    # With the daemon gone, the last known session name is still worth showing
+    # but the live fields are not: an unknown recording state has to read as
+    # unknown, not as a confident circle nobody can trust.
+    if state.link.connected:
+        recording = GLYPH_ACTIVE if state.session is not None else GLYPH_IDLE
+        devices = f"{len(state.devices):<2}"
+    else:
+        recording = GLYPH_UNKNOWN
+        devices = "? "
     return (
         f"FIELDDECK{sim} {word:<6} "
-        f"REC{GLYPH_ACTIVE if recording else GLYPH_IDLE} "
+        f"REC{recording} "
         f"SES {_clip(session, 16):<16} "
-        f"DEV {len(state.devices):<2} {fault:<8}{link}"
+        f"DEV {devices} {fault:<8}{link}"
     )
 
 
@@ -149,9 +158,11 @@ def _alert_line(state: UiState) -> tuple[str, str]:
             "estop",
         )
     if not state.link.connected:
-        detail = _clip(state.link.detail or "no connection", 46)
+        # Retry count first: it is the part that tells an operator whether the
+        # panel is still trying, and it is the part a long path would cut off.
+        detail = _clip(state.link.detail or "no connection", 44)
         return (
-            f"{GLYPH_FAULT} instrumentd unreachable: {detail} (retry {state.link.attempts})",
+            f"{GLYPH_FAULT} instrumentd unreachable (retry {state.link.attempts}): {detail}",
             "offline",
         )
     grants = safety.active_grants()
