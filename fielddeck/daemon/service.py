@@ -110,7 +110,7 @@ class InstrumentDaemon:
 
         self._socket_path = socket_path or self.paths.socket
         self._restricted_socket_path = (
-            restricted_socket_path or (self._socket_path.with_name("instrumentd-ai.sock"))
+            (restricted_socket_path or self._socket_path.with_name("instrumentd-ai.sock"))
             if enable_restricted_socket
             else None
         )
@@ -127,6 +127,20 @@ class InstrumentDaemon:
         self._safety_task: asyncio.Task[None] | None = None
         self._stopping = asyncio.Event()
         self._subscription_counter = 0
+
+    @property
+    def socket_path(self) -> Path:
+        """The full-authority socket.  HMI and ``fdctl`` connect here."""
+        return self._socket_path
+
+    @property
+    def ai_socket_path(self) -> Path | None:
+        """The restricted socket, or ``None`` when it is disabled.
+
+        Clients here are stamped ``source=claude`` and cannot arm, disarm or
+        clear an emergency stop no matter what they claim to be.
+        """
+        return self._restricted_socket_path
 
     def _register_optional_actions(self) -> None:
         """Load action providers that ship with optional subsystems."""
