@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import secrets
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -322,12 +323,24 @@ def root(
 
 @app.command()
 def status(ctx: typer.Context, json_out: JsonFlag = False) -> None:
-    """The one-screen overview: safety, session, devices, work in flight."""
+    """The one-screen overview: safety, session, devices, work in flight.
+
+    The status query tags itself with a request id and drops that one row from
+    "running actions". Every invocation would otherwise report itself, and a
+    panel that is never empty is a panel an operator stops reading — which is
+    exactly the panel that should be shouting when a capture is still running.
+    """
     settings = _settings(ctx, json_out)
+    self_request = f"fdctl-status-{secrets.token_hex(4)}"
 
     async def work(client: InstrumentClient) -> tuple[dict[str, Any], dict[str, Any]]:
-        overview = (await client.execute("system.status")).result
+        overview = (await client.execute("system.status", request_id=self_request)).result
         devices = (await client.execute("device.list")).result
+        overview["running_actions"] = [
+            item
+            for item in overview.get("running_actions") or []
+            if item.get("request_id") != self_request
+        ]
         return overview, devices
 
     overview, devices = _call(settings, work)
@@ -921,10 +934,29 @@ def can_listen(
         lambda: fmt.rows_table(
             f"{payload.get('count', 0)} frames in {payload.get('duration_s', 0)}s "
             f"({payload.get('mode', '?')})",
-            frames,
+            _display_frames(frames),
             columns=["monotonic_ns", "can_id", "dlc", "data", "description"],
         ),
     )
+
+
+def _display_frames(frames: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Render CAN frames the way every other CAN tool does.
+
+    Arbitration ids arrive as integers and are shown in hex, because that is
+    how they appear in a DBC, in candump, on a scope decode and in every
+    datasheet — an engineer reading 257 has to convert it to 0x101 before it
+    means anything.
+    """
+    out: list[dict[str, Any]] = []
+    for frame in frames:
+        row = dict(frame)
+        raw = row.get("can_id")
+        if isinstance(raw, int):
+            width = 8 if row.get("extended") or raw > 0x7FF else 3
+            row["can_id"] = f"0x{raw:0{width}X}"
+        out.append(row)
+    return out
 
 
 @can_app.command("capture")
@@ -1413,7 +1445,9 @@ async def _hold_lease(
             if monotonic_ns() >= deadline:
                 break
             await client.call("safety.lease_renew", {"lease_id": lease_id, "ttl_s": ttl_s})
-            emitter.note(f"lease {lease_id} renewed, {(deadline - monotonic_ns()) / 1e9:.0f}s left")
+            emitter.note(
+                f"lease {lease_id} renewed, {(deadline - monotonic_ns()) / 1e9:.1f}s of hold left"
+            )
     except (KeyboardInterrupt, asyncio.CancelledError):
         emitter.warn("interrupted: releasing the output")
     finally:
@@ -2183,11 +2217,20 @@ def watch_command(
     and answer "am I armed, and is anything energised?" at a glance.
     """
     settings = _settings(ctx, json_out)
+    self_request = f"fdctl-watch-{secrets.token_hex(4)}"
 
     async def poll(client: InstrumentClient) -> None:
         with fmt.live_status(settings.emitter) as update:
             while True:
-                update((await client.execute("system.status")).result)
+                # Same reason as ``fdctl status``: a watch line that always says
+                # "running system.status" is a watch line nobody reads.
+                overview = (await client.execute("system.status", request_id=self_request)).result
+                overview["running_actions"] = [
+                    item
+                    for item in overview.get("running_actions") or []
+                    if item.get("request_id") != self_request
+                ]
+                update(overview)
                 await asyncio.sleep(interval)
 
     try:

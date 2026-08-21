@@ -70,6 +70,16 @@ _SEVERITY_STYLES: dict[str, str] = {
     "critical": "bold white on red",
 }
 
+#: Fixed-width severity labels.  "DEBU" reads like a typo at 2am; every label
+#: here is a real word inside five columns.
+_SEVERITY_LABELS: dict[str, str] = {
+    "debug": "DEBUG",
+    "info": "INFO",
+    "warning": "WARN",
+    "error": "ERROR",
+    "critical": "CRIT",
+}
+
 _PERMISSION_STYLES: dict[str, str] = {
     "PASSIVE": "dim",
     "QUERY": "cyan",
@@ -110,8 +120,16 @@ class Emitter:
 
     def __init__(self, *, json_mode: bool = False, color: bool = True) -> None:
         self.json_mode = json_mode
-        self._out = Console(no_color=not color, highlight=False, emoji=False)
-        self._err = Console(stderr=True, no_color=not color, highlight=False, emoji=False)
+        # ``color_system=None`` is the switch that stops rich emitting escape
+        # sequences at all, rather than merely dropping colour: bold and dim are
+        # ANSI too, and a --no-color that still writes SGR codes is a --no-color
+        # that fails the one job it has. JSON mode takes the same path so even
+        # the stderr commentary beside a machine-readable document is plain.
+        styled = color and not json_mode
+        self._out = Console(color_system="auto" if styled else None, highlight=False, emoji=False)
+        self._err = Console(
+            stderr=True, color_system="auto" if styled else None, highlight=False, emoji=False
+        )
 
     @property
     def console(self) -> Console:
@@ -279,6 +297,12 @@ def kv_panel(title: str | None, mapping: Mapping[str, Any], *, style: str = "") 
     )
 
 
+#: Columns whose value is meant to be copied verbatim into another command.
+_IDENTITY_COLUMNS = frozenset(
+    {"id", "device_id", "device", "artifact_id", "grant_id", "lease_id", "session_id"}
+)
+
+
 def rows_table(
     title: str | None,
     rows: Sequence[Mapping[str, Any]],
@@ -294,7 +318,14 @@ def rows_table(
     keys = keys[:_MAX_NESTED_COLUMNS]
     table = Table(title=title, title_justify="left", box=box.SIMPLE, expand=False)
     for key in keys:
-        table.add_column(key, overflow="fold")
+        if key in _IDENTITY_COLUMNS:
+            # An id is the one cell an operator copies into the next command.
+            # Folding it across two lines at 80 columns — which is what the
+            # Pi's terminal is — makes it unusable for the only thing it is
+            # for. Descriptive columns wrap instead.
+            table.add_column(key, overflow="ellipsis", no_wrap=True)
+        else:
+            table.add_column(key, overflow="fold")
     for row in rows[:limit]:
         table.add_row(*[_scalar(row.get(key)) for key in keys])
     parts: list[RenderableType] = [table]
@@ -383,7 +414,7 @@ def _grant_rows(grants: Sequence[Mapping[str, Any]]) -> RenderableType:
     table.add_column("scope")
     table.add_column("expires in", justify="right")
     table.add_column("by")
-    table.add_column("grant")
+    table.add_column("grant", overflow="ellipsis", no_wrap=True)
     for grant in grants:
         remaining = float(grant.get("remaining_s") or 0.0)
         table.add_row(
@@ -400,11 +431,11 @@ def _lease_rows(leases: Sequence[Mapping[str, Any]]) -> RenderableType:
     if not leases:
         return Text("", style="dim")
     table = Table(box=box.SIMPLE, title="output leases", title_justify="left", expand=False)
-    table.add_column("device")
+    table.add_column("device", overflow="ellipsis", no_wrap=True)
     table.add_column("action")
     table.add_column("expires in", justify="right")
     table.add_column("owner")
-    table.add_column("lease")
+    table.add_column("lease", overflow="ellipsis", no_wrap=True)
     for lease in leases:
         table.add_row(
             str(lease.get("device_id", "?")),
@@ -427,14 +458,17 @@ def arm_banner(grants: Sequence[ArmGrant]) -> RenderableType:
     """
     body: list[RenderableType] = []
     for grant in grants:
-        expires_utc = format_utc_ns(grant.created_utc_ns + int(grant.ttl_s * 1e9))
+        # Time of day, not a full ISO stamp: a grant lasts minutes, and the
+        # full form wraps inside an 80-column panel, which is worse than
+        # assuming the operator knows what day it is.
+        expires_utc = format_utc_ns(grant.created_utc_ns + int(grant.ttl_s * 1e9))[11:19]
         line = Text()
         line.append(
             str(grant.permission).ljust(12),
             style=_PERMISSION_STYLES.get(str(grant.permission), "bold"),
         )
-        line.append(f"over {grant.scope.describe()}".ljust(34))
-        line.append(f"for {grant.ttl_s:g}s, until {expires_utc}")
+        line.append(f"for {grant.ttl_s:g}s, until {expires_utc}Z".ljust(30))
+        line.append(f"over {grant.scope.describe()}")
         body.append(line)
         if grant.note:
             body.append(Text(f"             note: {grant.note}", style="yellow"))
@@ -555,7 +589,9 @@ def device_table(
         by_id.setdefault(target, []).append(alias)
 
     table = Table(box=box.SIMPLE, expand=False)
-    table.add_column("id", overflow="fold")
+    # Never fold a device id: it is the value the operator types into the next
+    # command, and at the Pi's 80 columns folding split it mid-token.
+    table.add_column("id", overflow="ellipsis", no_wrap=True)
     table.add_column("kind")
     table.add_column("name", overflow="fold")
     table.add_column("state")
@@ -657,7 +693,9 @@ def session_table(sessions: Sequence[Mapping[str, Any]]) -> RenderableType:
     if not sessions:
         return Text('no sessions yet; start one with: fdctl session start "<name>"', style="dim")
     table = Table(box=box.SIMPLE, expand=False)
-    table.add_column("id", overflow="fold")
+    # Never fold a device id: it is the value the operator types into the next
+    # command, and at the Pi's 80 columns folding split it mid-token.
+    table.add_column("id", overflow="ellipsis", no_wrap=True)
     table.add_column("name", overflow="fold")
     table.add_column("state")
     table.add_column("started (utc)")
@@ -681,7 +719,8 @@ def event_line(event: Mapping[str, Any]) -> Text:
     clock = format_utc_ns(int(utc))[11:23] if utc else "-"
     line = Text()
     line.append(f"{clock} ", style="dim")
-    line.append(f"{severity[:4].upper():<5}", style=_SEVERITY_STYLES.get(severity, ""))
+    label = _SEVERITY_LABELS.get(severity, severity.upper()[:5])
+    line.append(f"{label:<6}", style=_SEVERITY_STYLES.get(severity, ""))
     line.append(f"{event.get('type', '?')} ", style="bold")
     for field in ("device_id", "action"):
         if event.get(field):
@@ -711,6 +750,13 @@ def live_status(emitter: Emitter) -> Iterator[Callable[[Mapping[str, Any]], None
     """
     if emitter.json_mode:
         yield emitter.stream
+        return
+    if not emitter.console.is_terminal:
+        # Redirected to a file or a pipe: repainting one line is meaningless
+        # there, and rich would hold everything back until the process ended --
+        # so a watch that gets killed would leave an empty log. One line per
+        # poll is the useful thing to have kept.
+        yield lambda status: emitter.console.print(watch_line(status))
         return
     with Live(console=emitter.console, refresh_per_second=4) as live:
         yield lambda status: live.update(watch_line(status))
