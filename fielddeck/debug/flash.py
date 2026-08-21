@@ -182,6 +182,7 @@ def _plan_openocd(
             firmware=str(firmware),
             warnings=warnings,
         )
+    _require_operation("openocd", operation, {"info", "verify", "reset", "erase", "program"})
     write = f"program {firmware}" + (f" {address}" if address else "") + " verify reset exit"
     return FlashPlan(
         tool="openocd",
@@ -193,6 +194,30 @@ def _plan_openocd(
         firmware=str(firmware),
         warnings=warnings,
     )
+
+
+def _require_operation(tool: str, operation: str, supported: set[str]) -> None:
+    """Refuse an operation this tool does not implement.
+
+    Every planner used to end with an unconditional "and anything else is a
+    program" return.  That made an unrecognised operation silently become a
+    firmware write: ``pyocd verify`` and ``dfu-util verify`` built a program
+    plan, and ``dfu-util reset`` and ``dfu-util erase`` did too -- so
+    ``flash.verify`` (declared QUERY) and ``debug.reset`` (declared CONTROL)
+    would have written firmware while the dispatcher believed it had authorized
+    a read and a reset.
+
+    Failing closed here is the cheap half of the fix.  The other half is in
+    ``DebugActions._execute``, which now refuses to run any plan more dangerous
+    than the permission the caller was actually granted -- so a future planner
+    with the same bug is caught even if this check is forgotten.
+    """
+    if operation not in supported:
+        raise UnsupportedCapability(
+            f"{tool} cannot {operation}; it supports {', '.join(sorted(supported))}",
+            details={"tool": tool, "operation": operation, "supported": sorted(supported)},
+            preserved="nothing was sent to the target",
+        )
 
 
 def _plan_pyocd(
@@ -226,6 +251,11 @@ def _plan_pyocd(
             target=target,
             warnings=["irreversible"],
         )
+    # pyocd has no standalone verify: `pyocd flash` programs and then verifies,
+    # so there is nothing to build for a read-only check. Say so, rather than
+    # quietly handing back a plan that writes -- which is what a trailing
+    # "everything else is a program" return did.
+    _require_operation("pyocd", operation, {"info", "reset", "erase", "program"})
     if firmware is None:
         raise InvalidRequest(f"{operation} needs a firmware file")
     args = ["flash", "-t", target]
@@ -281,6 +311,7 @@ def _plan_esptool(
             target=port,
             firmware=str(firmware),
         )
+    _require_operation("esptool", operation, {"info", "erase", "verify", "program"})
     return FlashPlan(
         tool="esptool.py",
         args=[*base, "write_flash", address or "0x0", str(firmware)],
@@ -303,6 +334,10 @@ def _plan_dfu(*, operation: str, firmware: Path | None, alt: str, device: str | 
             permission=PermissionLevel.QUERY,
             description="list DFU-capable devices and their alt settings",
         )
+    # DFU is a download protocol: it has no verify, no reset and no erase of
+    # its own. Falling through to -D for those turned `flash.verify` (QUERY)
+    # and `debug.reset` (CONTROL) into firmware writes.
+    _require_operation("dfu-util", operation, {"info", "program"})
     if firmware is None:
         raise InvalidRequest(f"{operation} needs a firmware file")
     return FlashPlan(

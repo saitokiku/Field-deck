@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
-from fielddeck.common.errors import InvalidRequest
+from fielddeck.common.errors import InvalidRequest, PermissionDenied
 from fielddeck.common.models import PermissionLevel, StrictModel
 from fielddeck.debug.firmware import inspect_firmware
 from fielddeck.debug.flash import build_plan, firmware_roots, run_plan
@@ -237,6 +237,33 @@ class DebugActions:
         plan_args = params.model_dump(exclude={"timeout_s", "confirm"})
         plan_args["operation"] = expect
         plan, info = await asyncio.to_thread(build_plan, **plan_args, extra_roots=self._roots(ctx))
+
+        # The plan knows what it actually does; the dispatcher authorized what
+        # the *action* declared. Those are two different facts, and they came
+        # apart: a planner that fell through to "program" for an operation it
+        # did not implement turned flash.verify (QUERY) and debug.reset
+        # (CONTROL) into firmware writes.
+        #
+        # Checking here rather than only in the planners is what makes that
+        # fail closed. A tool wrapper added next year with the same bug builds
+        # a FLASH plan, this refuses to run it, and the operator gets a
+        # sentence naming both permissions instead of a reflashed target.
+        granted = ctx.granted_permission
+        if plan.permission.rank > granted.rank:
+            raise PermissionDenied(
+                f"{plan.tool} would perform a {plan.permission} operation "
+                f"({plan.operation}: {plan.description}), but this call was authorized "
+                f"only as {granted}. Refusing to run it.",
+                details={
+                    "tool": plan.tool,
+                    "requested_operation": expect,
+                    "plan_operation": plan.operation,
+                    "plan_permission": str(plan.permission),
+                    "granted_permission": str(granted),
+                    "command": " ".join([plan.tool, *plan.args]),
+                },
+                preserved="nothing was sent to the target",
+            )
 
         record = await run_plan(
             plan,

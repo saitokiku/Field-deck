@@ -100,6 +100,15 @@ failure, a hardened systemd unit, udev rules, and a supervised tmux kiosk.
 Found during pre-release verification, listed because they say something about
 where the sharp edges are:
 
+- **A QUERY action could write firmware.** Every planner in
+  `fielddeck/debug/flash.py` ended with an unconditional "and anything else is
+  a program" return, so an operation a given tool did not implement silently
+  became a firmware write: `pyocd verify` and `dfu-util verify` built a
+  *program* plan under a QUERY grant, `dfu-util reset` did under CONTROL, and
+  `dfu-util erase` did under a DESTRUCTIVE confirmation naming an erase.
+  Planners now refuse what they cannot do, and `DebugActions._execute` refuses
+  any plan more dangerous than the permission the dispatcher granted — so the
+  same bug in a future tool wrapper fails closed.
 - **An in-flight action could undo a safe state that overtook it.** A slow
   `psu.output(enabled=True)` that was authorized before an emergency stop
   finished after it, and turned the rail back on. The stop reported success,
