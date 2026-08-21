@@ -50,8 +50,12 @@ steps:
     duration_s: 2
     label: bringup
 
+  # `can.count`, not `can.frames`: the capture action returns only the first
+  # frames in its result, so `frames` counts what came back, while `count`
+  # counts what was recorded. For "was there any traffic at all" they agree;
+  # for a threshold they do not.
   - assert:
-      expression: "can.frames > 10"
+      expression: "can.count > 10"
       message: "Fewer frames than a periodic bus should produce in two seconds"
 
   - note: "Capture stored in the session; decode it with can.decode and a DBC."
