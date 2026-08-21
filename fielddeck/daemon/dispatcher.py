@@ -31,8 +31,10 @@ from fielddeck.common.errors import (
     ActionCancelled,
     ActionTimeout,
     DeviceBusy,
+    EstopActive,
     FieldDeckError,
     InvalidRequest,
+    LeaseError,
 )
 from fielddeck.common.events import EventSeverity, EventType, new_event
 from fielddeck.common.logging import get_logger
@@ -92,6 +94,10 @@ class Dispatcher:
         self.sessions = sessions
         self._running: dict[str, _Running] = {}
         self._counter = 0
+        #: How many times each device has been driven to safe state.  A handler
+        #: compares this across its own execution to notice that the world was
+        #: made safe underneath it -- see :meth:`_superseded_by_safe_state`.
+        self._safe_state_generation: dict[str, int] = {}
 
     # -- public API --------------------------------------------------------
 
@@ -278,9 +284,15 @@ class Dispatcher:
                         payload={"params": _safe_params(values)},
                     )
                 )
+            # Sampled inside the lock but before the handler runs, so that a
+            # safe state applied at any point during the handler is visible.
+            safe_generation = self._safe_state_generation.get(device_id or "", 0)
             try:
                 payload = await self._run_handler(
                     spec, ctx, params, timeout, device_id, request, started
+                )
+                await self._reject_if_superseded(
+                    spec, effective, device_id, request, lease_info, safe_generation
                 )
             except BaseException:
                 # The action never happened, so the lease must not outlive it.
@@ -494,7 +506,7 @@ class Dispatcher:
         }
 
     def _abandon_lease(
-        self, lease_info: dict[str, Any], device_id: str | None, request: ActionRequest
+        self, lease_info: dict[str, Any] | None, device_id: str | None, request: ActionRequest
     ) -> None:
         """Give back a lease whose action failed, timed out or was cancelled."""
         lease = lease_info.get("lease") if lease_info else None
@@ -589,6 +601,82 @@ class Dispatcher:
 
     # -- lease reaping -----------------------------------------------------
 
+    async def _reject_if_superseded(
+        self,
+        spec: ActionSpec,
+        effective: PermissionLevel,
+        device_id: str | None,
+        request: ActionRequest,
+        lease_info: dict[str, Any] | None,
+        safe_generation: int,
+    ) -> None:
+        """Refuse to let a state change stand that a safe state has overtaken.
+
+        ``apply_safe_state`` deliberately does **not** take the device lock: an
+        emergency stop that queues behind a wedged driver is not an emergency
+        stop.  The cost of that choice is this race, and it is not theoretical:
+
+            psu.output(enabled=True) is authorized, takes its lease, takes the
+            lock, and is mid-write to the instrument.  ESTOP fires.  The stop
+            cancels what it can -- psu.output is not cancelable, because
+            abandoning an instrument half-configured is its own hazard -- and
+            drives every device safe.  The rail goes off.  Then the handler
+            finishes and turns it back on.  The stop reported success, the
+            action reported success, and the rail is live with the stop
+            latched.
+
+        Lease expiry and daemon shutdown reach ``apply_safe_state`` by the same
+        path and lose the same way, so this is keyed on "was this device safed
+        while I was running" rather than on the emergency stop specifically.
+
+        Only state-changing actions are reverted.  A capture or a read that
+        completed during a stop has already written its bytes, and discarding
+        evidence to tidy up the bookkeeping is the opposite of what a safety
+        system should do -- the timeline shows the stop alongside it.
+        """
+        if not spec.state_changing or device_id is None:
+            return
+        if self._safe_state_generation.get(device_id, 0) == safe_generation:
+            return
+
+        # Whatever was sustaining this must go first: leaving the lease behind
+        # would make the daemon believe an output it just turned off is held.
+        self._abandon_lease(lease_info, device_id, request)
+        await self.apply_safe_state(
+            reason=f"{spec.name} completed after {device_id} was driven safe",
+            device_ids=[device_id],
+        )
+
+        estop = self.safety.estop_controller.status
+        detail = {
+            "action": spec.name,
+            "device_id": device_id,
+            "permission": str(effective),
+            "request_id": request.request_id,
+        }
+        preserved = (
+            f"{device_id} was driven to its safe state again; captured data and "
+            "session metadata are intact"
+        )
+        _log.error(
+            "action completed after a safe state and was reverted",
+            extra={"device": device_id, "action": spec.name, "estop": estop.active},
+        )
+        if estop.active:
+            raise EstopActive(
+                f"{spec.name} finished after an emergency stop was latched, so its "
+                f"effect on {device_id} was undone",
+                details={**detail, "estop_reason": estop.reason},
+                preserved=preserved,
+            )
+        raise LeaseError(
+            f"{spec.name} finished after {device_id} was driven to its safe state "
+            "(the authorization or lease sustaining it ended mid-action), so its "
+            "effect was undone",
+            details=detail,
+            preserved=preserved,
+        )
+
     async def apply_safe_state(
         self, *, reason: str, device_ids: list[str] | None = None
     ) -> list[dict[str, Any]]:
@@ -614,6 +702,13 @@ class Dispatcher:
         ]
         if not drivers:
             return []
+
+        # Bumped before the first await, so a handler that finishes *during*
+        # this call still sees the change and reverts itself.
+        for driver in drivers:
+            self._safe_state_generation[driver.device_id] = (
+                self._safe_state_generation.get(driver.device_id, 0) + 1
+            )
 
         async def safe_one(driver: Driver) -> dict[str, Any]:
             try:
