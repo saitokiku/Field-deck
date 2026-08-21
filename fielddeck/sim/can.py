@@ -276,19 +276,29 @@ class SimCanDriver(SimulatedDeviceMixin, Driver):
                     f"({seconds:.6f}) {self.interface} "
                     f"{frame['can_id']:03X}#{frame['data'].upper()}\n"
                 )
-        artifact = ctx.recorder.add_artifact(
-            path,
-            kind="can",
-            media_type="text/vnd.candump",
-            device_id=self.device_id,
-            raw=True,
-            metadata={"frames": listen["count"], "bitrate": self.bitrate},
-        )
+
+        artifact = None
+        if listen["count"]:
+            artifact = ctx.recorder.add_artifact(
+                path,
+                kind="can",
+                media_type="text/vnd.candump",
+                device_id=self.device_id,
+                raw=True,
+                metadata={"frames": listen["count"], "bitrate": self.bitrate},
+            )
+        else:
+            # Same rule as the real SocketCAN driver: an empty file in the
+            # session is worse than no file, because a zero-byte artifact with
+            # a hash reads as "we recorded and the bus was quiet" -- evidence
+            # of something that never happened. The frame count still says so.
+            path.unlink(missing_ok=True)
+
         return {
             **listen,
             "frames": listen["frames"][:50],
             "truncated_in_result": listen["count"] > 50,
-            "artifact": artifact.model_dump(mode="json"),
+            "artifact": artifact.model_dump(mode="json") if artifact is not None else None,
         }
 
     @action(
