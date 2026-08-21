@@ -1,0 +1,83 @@
+# FieldDeck kiosk: Xorg, one terminal, tmux, and the HMI on tty1.
+#
+# This unit owns the *display*. It does not own hardware and it is not a
+# security boundary — the daemon is. The separation matters in one direction in
+# particular: this unit only Wants= instrumentd, so
+#
+#     systemctl restart fielddeck-kiosk
+#
+# restarts the panel and leaves the daemon, its arm grants and its running
+# captures completely alone. There is deliberately no Requires=, no BindsTo= and
+# no PartOf= between the two. The HMI is written to start and stay useful with
+# the daemon down; a panel that dies because the daemon blinked is a panel that
+# cannot show you why the daemon blinked.
+
+[Unit]
+Description=FieldDeck kiosk (Xorg + tmux + HMI on tty1)
+Documentation=file:/etc/fielddeck/xinitrc
+
+Wants=instrumentd.service
+After=instrumentd.service systemd-user-sessions.service
+
+# tty1 has one occupant. Without this, the getty and Xorg fight over the VT and
+# the panel comes up with a login prompt bleeding through it.
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+# X failing to start is usually a configuration problem, not a transient one.
+# Ten attempts is enough to ride out a slow panel probe and few enough that the
+# journal still shows the first failure.
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/fielddeck/fielddeck-kiosk.sh
+
+# Overridden by /etc/systemd/system/fielddeck-kiosk.service.d/10-operator.conf,
+# which scripts/install.sh writes with the account you passed to --user.
+#
+# The default below is intentionally an account with no login shell: if the
+# drop-in is missing, PAM refuses the session and this unit fails loudly. The
+# alternative default — no User= at all — would silently run Xorg as root.
+User=fielddeck
+Group=fielddeck
+
+# A real login session on tty1, and this is not optional:
+#   * Debian's Xorg.wrap only lets 'console' users start X, and you are a
+#     console user because logind says you have a session on a VT;
+#   * logind puts per-session ACLs on /dev/input/* and /dev/fb*, which is how a
+#     non-root X gets the touchscreen without a udev rule of its own.
+# Symptom when this is wrong: "xf86OpenConsole: Cannot open virtual console"
+# or an X server that starts but sees no input devices.
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+
+WorkingDirectory=/opt/fielddeck
+Environment=XDG_SESSION_TYPE=x11
+
+# The panel is the product. If it exits — X crash, terminal closed, HMI killed —
+# bring it back. 'always', not 'on-failure': a clean exit of the terminal still
+# leaves an operator staring at a blank console.
+Restart=always
+RestartSec=3s
+
+# Here the whole tree does go down together: X, the terminal, tmux and the HMI
+# are one display, and leaving a headless X server behind blocks the restart.
+KillMode=control-group
+TimeoutStopSec=15s
+
+# No hardening block, on purpose. This unit needs the framebuffer, the input
+# devices and a VT, and it runs as a human operator's account. Locking it down
+# would buy nothing: everything dangerous is behind the daemon's socket, and
+# the daemon is where the hardening lives.
+
+[Install]
+WantedBy=fielddeck.target

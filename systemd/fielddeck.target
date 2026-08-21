@@ -1,0 +1,26 @@
+# "FieldDeck is running" as a single unit you can start, stop and enable.
+#
+# Boot pulls in fielddeck.target; the target pulls in the daemon and, when the
+# unit is enabled, the kiosk. Two things follow that are worth knowing:
+#
+#   systemctl stop fielddeck.target     stops the daemon and the panel together
+#   systemctl restart fielddeck-kiosk   restarts only the panel
+#
+# The target Wants= the daemon rather than Requires= it: an operator who has
+# deliberately stopped instrumentd to run one by hand against a bench should not
+# find that starting the panel silently starts a second daemon underneath them.
+
+[Unit]
+Description=FieldDeck
+Documentation=https://github.com/saitokiku/field-deck
+
+Wants=instrumentd.service
+After=instrumentd.service
+
+# Not a boot target you can isolate to. Isolating would tear down sshd and the
+# gettys, and losing your way back into a field unit is not a recoverable
+# mistake at the top of a ladder.
+AllowIsolate=no
+
+[Install]
+WantedBy=multi-user.target

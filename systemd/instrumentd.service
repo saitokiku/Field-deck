@@ -1,0 +1,191 @@
+# FieldDeck instrument daemon.
+#
+# instrumentd is the only process on this machine that is allowed to touch
+# hardware. Everything else — fdctl, the HMI, recipes, the MCP server — talks to
+# it over a Unix socket and gets told what it may do. That makes this unit the
+# security boundary of the whole product, so the hardening below is not
+# decoration: it is the list of things a compromised or confused daemon still
+# cannot do.
+#
+# If you tighten anything here, read the comments first. Several of these
+# directives are one edit away from breaking SocketCAN or USB in ways whose
+# error messages point somewhere else entirely.
+
+[Unit]
+Description=FieldDeck instrument daemon (sole authority for hardware)
+Documentation=https://github.com/saitokiku/field-deck
+Documentation=file:/etc/fielddeck/safety.yaml
+
+# Nothing here waits for udev to settle. Discovery is passive and repeatable:
+# a probe plugged in after boot is found by 'fdctl discover', so blocking boot
+# on device enumeration would buy nothing.
+After=network.target
+
+# A daemon that cannot parse /etc/fielddeck/safety.yaml refuses to start, and
+# that is correct — it must never come up with an authorization policy the
+# operator did not write. Without a start limit it would then restart forever,
+# filling the journal and hiding the one line that explains why.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+ExecStart=/opt/fielddeck/venv/bin/instrumentd
+
+# The unprivileged account that owns hardware access. Its group is what makes
+# the control socket (mode 0660) openable by an operator without sudo; udev
+# rules put device nodes in the same group.
+User=fielddeck
+Group=fielddeck
+
+# /run/fielddeck holds instrumentd.sock and instrumentd-ai.sock. 0750 with
+# group fielddeck: group members can traverse the directory and open the
+# socket, everyone else gets EACCES at the directory, not at the socket.
+# systemd recreates this on every start and removes it on stop, which is why a
+# killed daemon never leaves a stale socket that clients mistake for a live one.
+RuntimeDirectory=fielddeck
+RuntimeDirectoryMode=0750
+
+# The session store. StateDirectory= both creates it with the right ownership
+# and punches the hole in ProtectSystem=strict that lets the daemon write there.
+StateDirectory=fielddeck
+StateDirectoryMode=0750
+
+# Spelled out as well, because this is the line an operator will look for when
+# captures start failing with EROFS.
+#
+# Moving the session store to an external SSD (storage.sessions_dir in
+# fielddeck.yaml) needs a matching drop-in, or ProtectSystem=strict will make
+# the new location read-only:
+#   systemctl edit instrumentd
+#   [Service]
+#   ReadWritePaths=/mnt/ssd/fielddeck
+ReadWritePaths=/var/lib/fielddeck
+
+# Operator overrides. Optional, and deliberately not the file install.sh writes:
+# nothing the installer generates should be able to change how the daemon
+# resolves its own paths behind your back.
+EnvironmentFile=-/etc/fielddeck/instrumentd.env
+
+# Logs are structured JSON on stderr; journald keeps them.
+Environment=PYTHONUNBUFFERED=1
+
+# Explicit rather than implied: 'backend' would ask pyvisa-py for its resource
+# list, and pyvisa-py's VXI-11 discovery broadcasts onto the network. Passive
+# enumeration reads sysfs and transmits nothing.
+Environment=FIELDDECK_VISA_DISCOVERY=passive
+
+# --- shutdown ---------------------------------------------------------------
+#
+# On SIGTERM the daemon drives every controllable device to its safe state
+# before it lets go. That path talks to real instruments over slow links, so it
+# needs room; killing it early is how you end up with a supply still energised
+# after 'systemctl stop'.
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+
+# 'mixed' sends SIGTERM to the main process only. The default (control-group)
+# would also SIGTERM openocd or sigrok-cli mid-run behind the daemon's back;
+# the daemon terminates its own children through its subprocess adapter, which
+# knows which ones are mid-flash.
+KillMode=mixed
+
+Restart=on-failure
+RestartSec=2s
+
+# The kernel picking this process first under memory pressure means outputs stay
+# energised with nothing watching them. Make it a late choice, not an early one.
+OOMScoreAdjust=-200
+
+# --- hardening --------------------------------------------------------------
+
+# No path from here to more privilege: no setuid helper, no sudo, no
+# capability gain. The daemon never needs to become root.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# NOTE: tcpdump (net.capture) needs CAP_NET_RAW and will fail without it. That
+# is deliberate — packet capture on arbitrary interfaces is a real capability
+# and not one every unit should carry. If you want it on this unit:
+#   systemctl edit instrumentd
+#   [Service]
+#   AmbientCapabilities=CAP_NET_RAW
+#   CapabilityBoundingSet=CAP_NET_RAW
+
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+UMask=0027
+
+# Other processes' /proc entries are hidden, but ProcSubset stays at 'all':
+# 'pid' would also hide /proc/cpuinfo, and the BLAS numpy links against reads
+# it at import time to pick a kernel.
+ProtectProc=invisible
+
+# --- devices ----------------------------------------------------------------
+#
+# 'closed' means: only the nodes listed below, plus the harmless standard ones
+# (/dev/null, zero, full, random, urandom, tty). PrivateDevices=yes is NOT set —
+# it would give the daemon a private /dev with no hardware in it at all.
+#
+# If a device class is missing here, the symptom is a permission error on a node
+# that ls shows as group-readable, which is thoroughly confusing. The escape
+# hatch, when you have an adapter this list does not cover:
+#   systemctl edit instrumentd
+#   [Service]
+#   DeviceAllow=/dev/your-node rw
+# or, to stop filtering entirely, DevicePolicy=auto.
+DevicePolicy=closed
+DeviceAllow=char-ttyUSB rw
+DeviceAllow=char-ttyACM rw
+DeviceAllow=char-ttyAMA rw
+DeviceAllow=char-ttyS rw
+# /dev/bus/usb/*: the libusb path used by pyusb, openocd, dfu-util and sigrok.
+DeviceAllow=char-usb_device rw
+# /dev/usbtmc*: bench instruments claimed by the kernel's usbtmc driver.
+DeviceAllow=char-usbtmc rw
+DeviceAllow=char-i2c rw
+DeviceAllow=char-spidev rw
+DeviceAllow=char-gpiochip rw
+DeviceAllow=char-hidraw rw
+# V4L2 stills for session evidence.
+DeviceAllow=char-video4linux rw
+
+# --- sockets ----------------------------------------------------------------
+#
+# AF_UNIX    the control socket, and the AI socket.
+# AF_CAN     SocketCAN. This is the one people delete. CAN is a socket family,
+#            not a device node, so no DeviceAllow line protects it: drop AF_CAN
+#            and every CAN capture fails with EAFNOSUPPORT, which reads like a
+#            missing kernel module rather than a policy decision.
+# AF_NETLINK 'ip -details -json link show' — how the daemon reads a CAN link's
+#            bitrate and listen-only state without touching it.
+# AF_PACKET  tcpdump. Harmless to allow: without CAP_NET_RAW it still cannot
+#            open a capture socket.
+# AF_INET/6  Modbus TCP and LAN/SCPI instruments.
+RestrictAddressFamilies=AF_UNIX AF_CAN AF_NETLINK AF_PACKET AF_INET AF_INET6
+
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# MemoryDenyWriteExecute is deliberately NOT set. libffi builds executable
+# trampolines for ctypes callbacks, which several of the optional hardware
+# libraries rely on; denying W^X breaks them at import time with a SIGSEGV that
+# looks like a hardware fault. The daemon runs no untrusted code, so the trade
+# is not worth it here.
+
+[Install]
+WantedBy=fielddeck.target
