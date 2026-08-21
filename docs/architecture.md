@@ -299,6 +299,13 @@ fielddeck/
   mcp/          MCP server and tools
 ```
 
-`fielddeck/__init__.py` uses PEP 562 lazy re-exports: importing `fielddeck` does
-not import `textual`, `pyserial` or `python-can`. `fdctl status` should not pay
-for the HMI.
+`fielddeck/__init__.py` is fifteen lines and re-exports **nothing** — just a
+version and the protocol number. Importing `fielddeck` therefore pulls in no
+`textual`, no `pyserial`, no `python-can`; every subsystem is imported by the
+module that needs it, and the optional hardware stacks are imported inside the
+functions that use them.
+
+That is why `fdctl status` does not pay for the HMI, and why the package
+imports cleanly on a machine with none of the hardware extras installed. CI
+asserts it: a job fails the build if importing `fielddeck` pulls in any of the
+heavy optional modules.

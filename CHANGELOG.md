@@ -124,8 +124,9 @@ where the sharp edges are:
 - **`fdctl` could not find the daemon on an installed system**, because the
   install-layout probe required write access to a directory operators
   legitimately cannot write.
-- **A compound-SCPI bypass**: `OUTP ON;*IDN?` classified as a query. Compound
-  commands are now classified by their most dangerous clause.
+- **A compound-SCPI bypass**: `OUTP ON;*IDN?` classified as a query because it
+  ends in a question mark. A message is a query only if every
+  semicolon-separated segment is one.
 - **A nested-exponent denial of service** in the recipe expression evaluator.
 - **`tools.convert` answered "internal error"** on long digit strings, where
   CPython's int/str conversion limit and a float conversion both escaped

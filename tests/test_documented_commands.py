@@ -151,3 +151,31 @@ def test_no_documented_call_passes_a_json_blob() -> None:
     assert not offenders, "fdctl call takes KEY=VALUE, not a JSON blob:\n  " + "\n  ".join(
         offenders
     )
+
+
+def test_a_doc_that_quotes_a_recipe_in_full_quotes_all_of_it() -> None:
+    """``recipes.md`` says "The whole of ..." and then showed six of seven steps.
+
+    The omitted step was a ``note`` telling the reader to check framing against
+    the capture before trusting the baud rate -- which is the most useful line
+    in the file, and exactly the sort of thing that gets dropped when a code
+    block is trimmed to fit.
+    """
+    doc = REPO / "docs" / "recipes.md"
+    source = doc.read_text()
+
+    claim = re.search(
+        r"The whole of `(?P<path>[^`]+)`:\s*\n+```ya?ml\n(?P<body>.*?)\n```",
+        source,
+        re.S,
+    )
+    assert claim, "docs/recipes.md no longer quotes a recipe in full; drop this test"
+
+    quoted = claim.group("body").strip()
+    actual = (REPO / claim.group("path")).read_text()
+
+    # The doc starts the quote at `version:`, skipping the file's comment header.
+    start = actual.index("version: 1")
+    assert quoted == actual[start:].strip(), (
+        f"docs/recipes.md claims to show the whole of {claim.group('path')} and does not"
+    )

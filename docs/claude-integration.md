@@ -93,7 +93,7 @@ design in one tool.
 
 ## The tools
 
-29 tools, in six groups. Exactly one — `estop` — changes state. Every tool is
+29 tools, in eight groups. Exactly one — `estop` — changes state. Every tool is
 declared PASSIVE or QUERY; nothing above QUERY is exposed at all.
 
 | Group | Tools |

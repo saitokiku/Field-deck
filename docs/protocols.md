@@ -52,7 +52,7 @@ message; an ID appearing four times in five seconds with no pattern is an event.
 ### DBC decode
 
 ```bash
-fdctl can decode <artifact> --dbc vehicle.dbc
+fdctl can decode can0 --dbc vehicle.dbc --path can/can0-capture-0001.log
 ```
 
 Produces a derived artifact recording `source_artifact_ids`, `producer` and
@@ -145,9 +145,9 @@ RTU (serial) and TCP. Read/write coils, discrete inputs, holding registers and
 input registers.
 
 ```bash
-fdctl modbus read <device> --station 1 --kind holding --address 0 --count 10
-fdctl modbus write <device> --station 1 --address 40 --value 1234   # CONTROL
-fdctl modbus scan <device> --start 1 --end 32
+fdctl modbus read  --device role:bus --slave 1 --kind holding --address 0 --count 10
+fdctl modbus write --device role:bus --slave 1 --address 40 --register 1234   # CONTROL
+fdctl modbus scan  --device role:bus --start 1 --end 32
 ```
 
 ### Reads are QUERY, not PASSIVE
@@ -280,7 +280,7 @@ array. Capture, then decode I²C, SPI or UART.
 fdctl call logic.devices
 fdctl call logic.capture device=sim:logic:sim-la-0 samplerate=4m seconds=2
 fdctl call logic.decode device=sim:logic:sim-la-0 \
-    artifact_path=logic/sim-la-0-logic-0001.sr decoder=i2c
+    artifact_path=logic/logic-0001.sr decoder=i2c
 ```
 
 Decode output is a derived artifact with provenance, like everything else.

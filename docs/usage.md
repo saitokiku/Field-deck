@@ -145,7 +145,7 @@ Capture writes an immutable candump-format artifact with a SHA-256:
 ### Decoding
 
 ```bash
-fdctl can decode <capture-artifact> --dbc /path/to/vehicle.dbc
+fdctl can decode can0 --dbc /path/to/vehicle.dbc --path can/can0-capture-0001.log
 fdctl call can.isotp artifact_path=can/can0-capture-0001.log
 fdctl call can.uds_decode artifact_path=can/can0-capture-0001.log
 fdctl call can.j1939 artifact_path=can/can0-capture-0001.log
@@ -201,7 +201,7 @@ fdctl serial send ttyUSB0 --text 'AT+GMR' --newline
 
 ```bash
 fdctl serial capture ttyUSB0 --seconds 5
-fdctl analyze --path serial/ttyUSB0-capture-0001.bin
+fdctl analyze --path serial/capture-0001.bin
 ```
 
 `analyze` looks at bit-time distribution, framing-error patterns and byte-value
@@ -214,8 +214,8 @@ settle it.
 ## Modbus
 
 ```bash
-fdctl modbus read <device> --station 1 --kind holding --address 0 --count 10
-fdctl modbus scan <device> --start 1 --end 32
+fdctl modbus read --device role:bus --slave 1 --kind holding --address 0 --count 10
+fdctl modbus scan --device role:bus --start 1 --end 32
 ```
 
 Reads are **QUERY**, not PASSIVE: a read puts a request on the wire, and on a bus
@@ -225,7 +225,7 @@ Writes are CONTROL:
 
 ```bash
 fdctl arm control --ttl 60
-fdctl modbus write <device> --station 1 --address 40 --value 1234
+fdctl modbus write --device role:bus --slave 1 --address 40 --register 1234
 ```
 
 `modbus scan` is bounded, and FieldDeck forces `retries=1` on scans — retrying
@@ -423,7 +423,7 @@ Glyphs carry meaning so it reads on a monochrome panel:
 ```bash
 fdctl --json status | jq -r '.safety.state'
 fdctl --json can stats can0 | jq '.ids[] | select(.jitter_ms > 1)'
-fdctl --json session list | jq -r '.[0].id'
+fdctl --json session list | jq -r '.sessions[0].id'
 ```
 
 `-y` skips confirmation prompts. `--timeout` bounds how long to wait for the

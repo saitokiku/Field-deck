@@ -172,7 +172,7 @@ ACKs on a bus you have the wrong bitrate for can bus-off the real participants.
 
 ```bash
 fdctl serial capture ttyUSB0 --seconds 5
-fdctl analyze --path serial/ttyUSB0-capture-0001.bin
+fdctl analyze --path serial/capture-0001.bin
 ```
 
 `analyze` looks at bit timing and byte-value distribution and ranks hypotheses.
@@ -200,7 +200,8 @@ sudo systemctl mask ModemManager     # a common culprit on Debian
 ## Modbus: the device doesn't answer
 
 - **Station address.** Off-by-one between documentation and wire format is
-  endemic. Scan a small range: `fdctl modbus scan <device> --start 1 --end 16`.
+  endemic. Scan a small range:
+  `fdctl modbus scan --device role:bus --start 1 --end 16`.
 - **Register offset.** "Holding register 40001" in a manual is usually address
   `0` on the wire. This trips everyone once.
 - **Framing.** 9600 8E1 is common and is not the 8N1 default.
@@ -365,8 +366,12 @@ fdctl scpi query <device> 'SYST:ERR?'      # the instrument's own complaint
 `SYST:ERR?` is the fastest diagnosis: the instrument tells you what it did not
 like.
 
-Note that FieldDeck classifies compound SCPI by its most dangerous clause —
-`OUTP ON;*IDN?` is a POWER command, not a query, and is refused as one.
+Note how FieldDeck classifies compound SCPI. A message is a query only if
+**every** semicolon-separated segment is one, so `OUTP ON;*IDN?` — which ends
+in a question mark and would energise an output — is not a query, and
+`scpi.query` refuses it and tells you to use the typed actions (`psu.set`,
+`psu.output`) instead, so the permission model can see what you are asking
+for.
 
 Please [report what you find](https://github.com/saitokiku/field-deck/issues). A
 profile that has actually been on a bench is worth ten that have been read
@@ -380,8 +385,9 @@ about.
 python3 -X importtime -c "import fielddeck" 2>&1 | tail -5
 ```
 
-`fielddeck` uses lazy re-exports so importing it does not pull in `textual`,
-`pyserial` or `python-can`. If something has broken that, this shows it.
+`fielddeck/__init__.py` re-exports nothing, so importing it should pull in
+almost nothing — no `textual`, no `pyserial`, no `python-can`. If something has
+added a convenience import at package level, this shows it as a large entry.
 
 ---
 

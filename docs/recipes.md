@@ -87,6 +87,10 @@ steps:
       expression: "serial.chunks > 1"
       message: "A single burst is not a running link; expected periodic traffic"
 
+  - note: >-
+      Raw bytes and an arrival-time index are in the session. Check framing
+      against the capture before concluding the baud rate is right.
+
 finally:
   - mark: serial-identify-complete
 ```
@@ -242,7 +246,7 @@ fdctl recipe list          # names, worst-case permission, step count, requireme
 fdctl recipe validate <name>
 fdctl recipe dry-run <name>
 fdctl recipe run <name>
-fdctl recipe cancel <run-id>
+fdctl recipe cancel --run-id <run-id>
 ```
 
 `validate` compiles and reports:
