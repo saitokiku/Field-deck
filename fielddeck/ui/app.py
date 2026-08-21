@@ -50,7 +50,18 @@ class FieldDeckApp(App[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         # Reachable from every screen, including modals: stopping is never
         # gated, never confirmed and never more than one key away.
-        Binding("ctrl+e", "estop", "E-STOP", show=True, priority=True),
+        #
+        # Two keys for one action, deliberately. F9 is the one to reach for
+        # under stress -- a single key, no chord, no second hand -- and it is
+        # what the documentation tells an operator to press. ctrl+e stays
+        # because it is what the panel shipped with, and taking away a
+        # published emergency stop is not something to do quietly.
+        #
+        # Only F9 is shown in the footer: an emergency stop advertising two
+        # keys invites a moment's choice, and that moment is the one thing
+        # this binding exists to avoid.
+        Binding("f9", "estop", "E-STOP", show=True, priority=True),
+        Binding("ctrl+e", "estop", "E-STOP", show=False, priority=True),
         Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
     ]
 

@@ -144,6 +144,10 @@ where the sharp edges are:
   section exists to say what is missing and what it costs, did not mention it.
 - **The 90° and 270° touch rotation matrices were swapped** between the
   troubleshooting guide and the shipped Xorg configuration.
+- **The documented emergency-stop key did not exist.** Four documents named
+  F9; the HMI bound only `ctrl+e`. F9 is now bound (and is the one shown in
+  the footer, because an emergency stop advertising two keys invites a
+  moment's choice); `ctrl+e` still works.
 
 ### Known limitations
 
