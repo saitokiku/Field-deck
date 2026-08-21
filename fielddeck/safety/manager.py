@@ -239,6 +239,22 @@ class SafetyManager:
         status = self.estop_controller.engage(reason, source)
         leases = self.leases.take_all()
         revoked = self.arm_registry.revoke_all(reason="emergency stop")
+        for grant in revoked:
+            # Emitted individually as well as summarised in the ESTOP payload:
+            # the audit trail should show each authorization being taken away,
+            # and a client watching ARM_REVOKED to keep its banner honest
+            # should not have to special-case the one event that matters most.
+            self._emit(
+                new_event(
+                    EventType.ARM_REVOKED,
+                    source=source,
+                    severity=EventSeverity.WARNING,
+                    permission=grant.permission,
+                    session_id=session_id,
+                    message=f"{grant.permission} authorization revoked by emergency stop",
+                    payload=grant.model_dump(mode="json"),
+                )
+            )
         self._emit(
             new_event(
                 EventType.ESTOP,
