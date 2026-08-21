@@ -114,7 +114,11 @@ jobs:
       - name: Installer dry run
         # --dry-run needs no root and changes nothing. It must stay runnable,
         # because "read the plan before you run it" is the documented workflow.
-        run: scripts/install.sh --dry-run
+        #
+        # -y because the runner is x86_64: the installer correctly refuses to
+        # guess on a non-Pi, non-interactively, and that refusal is a feature
+        # worth keeping rather than working around in the script.
+        run: scripts/install.sh --dry-run -y
 
   config:
     # An example config that does not load is worse than no example: people

@@ -484,6 +484,15 @@ check_tool i2cdetect  "I2C bus scan"                  i2c-tools
 check_tool tcpdump    "packet capture"                tcpdump
 check_tool ethtool    "ethernet link facts"           ethtool
 check_tool lsusb      "USB enumeration from the shell" usbutils
+
+# camera.snapshot picks whichever of these exists, so report the set rather
+# than any one of them: an operator who has ffmpeg does not need fswebcam.
+if have fswebcam || have ffmpeg || have v4l2-ctl; then
+  pass "camera backend" "$(for t in fswebcam ffmpeg v4l2-ctl; do have "$t" && printf '%s ' "$t"; done)"
+else
+  warn "camera backend" "missing — camera.snapshot is registered but cannot capture"
+  fixup "sudo apt install fswebcam"
+fi
 have picotool  || info "picotool"  "absent — no RP2040 BOOTSEL flashing"
 have pyocd     || info "pyocd"     "absent — CMSIS-DAP/J-Link falls back to openocd"
 have esptool.py|| info "esptool.py" "absent — no ESP32/ESP8266 flashing"

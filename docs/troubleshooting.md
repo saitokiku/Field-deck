@@ -264,10 +264,15 @@ Common matrices:
 
 | Rotation | Matrix |
 |---|---|
-| none | `1 0 0 0 1 0 0 0 1` |
-| 90° CW | `0 1 0 -1 0 1 0 0 1` |
-| 180° | `-1 0 1 0 -1 1 0 0 1` |
-| 270° CW | `0 -1 1 1 0 0 0 0 1` |
+| none | `1 0 0  0 1 0  0 0 1` |
+| 90° CW | `0 -1 1  1 0 0  0 0 1` |
+| 180° | `-1 0 1  0 -1 1  0 0 1` |
+| 270° CW | `0 1 0  -1 0 1  0 0 1` |
+| mirror horizontal | `-1 0 1  0 1 0  0 0 1` |
+| mirror vertical | `1 0 0  0 -1 1  0 0 1` |
+
+The same table is in `/etc/X11/xorg.conf.d/10-fielddeck-touch.conf`, which is
+where a working matrix has to end up to survive a reboot.
 
 When one works, write it into `/etc/X11/xorg.conf.d/10-fielddeck-touch.conf`.
 That file explains why it sets *options* rather than a `Driver` line, and what

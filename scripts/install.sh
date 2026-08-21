@@ -176,6 +176,10 @@ PKGS_BUILD=(
   python3-dev         # headers: some wheels still build from source on arm
   build-essential     # ditto; also what openocd/dfu users expect to find
   git                 # recipes and firmware are usually pulled from git
+  tmux                # the top-level session manager for HMI/CLAUDE/SHELL/LOG.
+                      # Not a nicety and not preinstalled on Pi OS Lite: without
+                      # it the kiosk chain has no session manager and there is
+                      # no 'fielddeck-session' on a headless unit either.
 )
 PKGS_BUS=(
   can-utils           # candump/cansend — the reference for "is the bus alive"
@@ -184,6 +188,10 @@ PKGS_BUS=(
   ethtool             # link facts for the network transport
   tcpdump             # net.capture shells out to this
   libusb-1.0-0        # pyusb/openocd/dfu-util talk to USB through it
+  fswebcam            # camera.snapshot needs a still-capture backend; without
+                      # one the camera actions are registered and can never
+                      # succeed. ~100 kB, and the alternatives are ffmpeg
+                      # (large) or v4l-utils, both of which it also accepts.
 )
 PKGS_INSTRUMENT=(
   sigrok-cli          # logic analyzer capture (fielddeck/capture/sigrok.py)
@@ -349,8 +357,6 @@ install_apt() {
     say "kiosk packages skipped (--no-kiosk)"
   fi
 
-  # tmux is in PKGS_BUILD conceptually but listed separately here so the intent
-  # reads clearly: it is the top-level session manager, not a nicety.
   run env DEBIAN_FRONTEND=noninteractive apt-get update
   run env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${pkgs[@]}"
   ok "apt packages installed"

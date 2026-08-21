@@ -175,7 +175,7 @@ Useful options:
 
 1. **Checks the machine.** Architecture, OS, Python version. On anything that
    isn't a Pi running Bookworm it says so plainly and asks before continuing.
-2. **Installs 23 apt packages** in four groups — build, bus tools, instrument
+2. **Installs 25 apt packages** in four groups — build, bus tools, instrument
    tools, and (unless `--no-kiosk`) a minimal Xorg. Every package has a comment
    in `scripts/install.sh` explaining why it is there. A package nobody can
    justify is a package that should not be on a field device.

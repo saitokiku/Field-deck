@@ -135,6 +135,15 @@ where the sharp edges are:
 - **The simulated CAN driver kept zero-frame capture files** where the real
   driver deletes them, so a 0-byte artifact with a hash read as "we recorded
   and the bus was quiet".
+- **The installer never installed tmux**, while announcing that it did. tmux is
+  the top-level session manager for the whole kiosk chain and is not
+  preinstalled on Raspberry Pi OS Lite, so a clean install produced a unit
+  whose panel could not start.
+- **No still-capture backend was installed**, so `camera.snapshot` was
+  registered and could never succeed — and preflight, whose optional-tools
+  section exists to say what is missing and what it costs, did not mention it.
+- **The 90° and 270° touch rotation matrices were swapped** between the
+  troubleshooting guide and the shipped Xorg configuration.
 
 ### Known limitations
 
