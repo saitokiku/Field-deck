@@ -171,11 +171,16 @@ link` command to change that. It does not reconfigure your bus for you — see
 
 ```bash
 fdctl serial list
-fdctl serial configure ttyUSB0 --baudrate 115200 --parity N --stopbits 1
+fdctl serial configure ttyUSB0 --baud 115200 --parity N --stopbits 1 --electrical rs232
 fdctl serial status ttyUSB0
 fdctl serial monitor ttyUSB0 --seconds 10
 fdctl serial capture ttyUSB0 --seconds 60
 ```
+
+`--electrical` records what is physically on the wire — `ttl`, `rs232`, `rs485`
+or `unknown`. FieldDeck never infers it, and `unknown` is what it stays until
+you say. It goes into the session, so a capture you open in six months still
+says what the adapter was.
 
 Capture is **byte-exact**: all 256 byte values, embedded NULs, CRLF and invalid
 UTF-8 survive a round trip unchanged. Verified against a pty.
@@ -189,7 +194,7 @@ Transmitting needs CONTROL:
 ```bash
 fdctl arm control --ttl 60
 fdctl serial send ttyUSB0 --hex 010300000002
-fdctl serial send ttyUSB0 --text 'AT+GMR' --append-crlf
+fdctl serial send ttyUSB0 --text 'AT+GMR' --newline
 ```
 
 ### Unknown baud rate

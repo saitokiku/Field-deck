@@ -464,7 +464,7 @@ but a route.
 ```bash
 lsusb                        # is it enumerated at all
 ls -l /dev/usbtmc*           # expect group fielddeck
-fdctl bench devices
+fdctl bench list
 fdctl scpi query <device> '*IDN?'
 ```
 
