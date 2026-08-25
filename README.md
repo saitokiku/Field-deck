@@ -252,6 +252,7 @@ See **[docs/claude-integration.md](docs/claude-integration.md)**.
 | [docs/protocols.md](docs/protocols.md) | What each bus decoder does and what it refuses to assume |
 | [docs/recipes.md](docs/recipes.md) | Writing repeatable test procedures in YAML |
 | [docs/claude-integration.md](docs/claude-integration.md) | The MCP server and the AI boundary |
+| [docs/field-op-desktop.md](docs/field-op-desktop.md) | The optional Openbox desktop for when a monitor and keyboard are plugged in |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Symptom → cause → fix |
 
 ---

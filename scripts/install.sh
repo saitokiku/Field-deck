@@ -742,9 +742,17 @@ ${C_BOLD}4. Does the CLI reach the daemon?${C_OFF}
 
 ${C_BOLD}5. Does it work with nothing attached?${C_OFF}
      FIELDDECK_SIM=1 fdctl --help
-   And with simulated hardware, on a spare shell:
-     sudo systemctl stop instrumentd
-     sudo -u ${FD_USER} FIELDDECK_SIM=1 ${VENV}/bin/instrumentd
+   And with simulated hardware, in a private instance that leaves the installed
+   daemon running and touches nothing under /run, /etc or /var:
+     export FIELDDECK_HOME=~/.fielddeck-sim
+     FIELDDECK_SIM=1 ${VENV}/bin/instrumentd &
+     FIELDDECK_HOME=~/.fielddeck-sim ${VENV}/bin/fdctl devices
+   Stop it with 'kill %1' and remove ~/.fielddeck-sim when you are done.
+
+   Do NOT expect 'systemctl stop instrumentd' followed by running instrumentd as
+   ${FD_USER} to work: /run/fielddeck is created by the unit's RuntimeDirectory=
+   and is removed the moment the unit stops, so the daemon then has nowhere to
+   put its socket and exits with a ConfigurationError.
 
 ${C_BOLD}6. Everything at once${C_OFF}
      sudo fielddeck-preflight
