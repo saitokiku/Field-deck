@@ -216,6 +216,34 @@ No desktop shell.
 
 If the touchscreen works reliably from the Linux console with mouse/touch events, Xorg may later be removed.
 
+## 3.1 The one sanctioned exception: the Field-Op desktop
+
+Everything above governs **the bench unit** — the Pi wired to a DUT, driven from
+a 3.5" panel. It is not a rule about the hardware, it is a rule about that role.
+
+The same Pi is also carried back to a desk, where a monitor, keyboard and mouse
+get plugged in and the operator wants to read a datasheet, open a capture in
+Wireshark, and write up what happened. `scripts/field-op-desktop.sh` installs an
+Openbox desktop for exactly that, and it does have a panel, a file manager and a
+wallpaper. See [docs/field-op-desktop.md](docs/field-op-desktop.md).
+
+This is a deliberate, owner-approved exception, not drift. Do not remove it as a
+§3 violation. The constraints that keep it from becoming one:
+
+- It is **never** installed by `scripts/install.sh`, and is never a dependency of
+  `instrumentd`, the HMI, `fdctl`, recipes or the MCP server. A bench unit that
+  never runs it must be fully functional, and is.
+- It is a **session you choose at the greeter**, alongside the existing entries,
+  not a replacement for any of them and not something boot pulls in.
+- It installs no hardware access of its own. Its FieldDeck menu entries shell out
+  to `fdctl`, `fielddeck-ui` and `fielddeck-session` like any other client, and
+  are bound by the same authorization model. Nothing in it touches `/dev/*`.
+- The kiosk path (§3's Xorg → terminal → tmux → HMI) is untouched and remains
+  what a panel-equipped unit boots into.
+
+If a future change would make the daemon, the panel or the CLI depend on this
+desktop being present, that change is wrong — fix the change, not this file.
+
 ---
 
 # 4. Local UI Contract
