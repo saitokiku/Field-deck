@@ -20,6 +20,30 @@ XINITRC="${FIELDDECK_XINITRC:-/etc/fielddeck/xinitrc}"
 VT="${FIELDDECK_KIOSK_VT:-1}"
 DISPLAY_NUM="${FIELDDECK_KIOSK_DISPLAY:-:0}"
 
+# Xorg's config directory. Default empty = Xorg's own default,
+# /etc/X11/xorg.conf.d, which every X server on the machine shares.
+#
+# That default is wrong the moment the unit also runs a desktop on HDMI. The
+# panel needs Device/Screen sections pinning X to fbdev on /dev/fb1, and those
+# sections are not panel-specific advice to a desktop X server - they are an
+# instruction to draw on a 480x320 SPI display. Putting them in the shared
+# directory moves the desktop onto the panel too.
+#
+# Point this at a directory only the kiosk reads and the two stop fighting.
+#
+# It must be a RELATIVE path, resolved by Xorg under /etc/X11. That is not a
+# style preference: with needs_root_rights=yes in Xwrapper.config - which an
+# fbdev panel requires, because fbdev opens /dev/fb1 directly instead of a DRM
+# device with logind ACLs - Xorg refuses an absolute -configdir outright:
+#
+#   Invalid argument for -configdir - "/etc/fielddeck/xorg.conf.d"
+#     With elevated privileges -configdir must specify a relative path
+#     without any ".." elements.
+#
+# So the panel's config lives in /etc/X11/fielddeck.conf.d and this says
+# "fielddeck.conf.d".
+XORG_CONFIGDIR="${FIELDDECK_XORG_CONFIGDIR:-}"
+
 log()  { printf 'fielddeck-kiosk: %s\n' "$*"; }
 warn() { printf 'fielddeck-kiosk: WARNING: %s\n' "$*" >&2; }
 die()  { printf 'fielddeck-kiosk: ERROR: %s\n' "$*" >&2; exit 1; }
@@ -118,7 +142,31 @@ main() {
     run_on_console
   fi
 
-  log "exec xinit $XINITRC -- $DISPLAY_NUM vt$VT"
+  XORG_ARGS=()
+  if [[ -n "$XORG_CONFIGDIR" ]]; then
+    if [[ "$XORG_CONFIGDIR" = /* ]]; then
+      warn "FIELDDECK_XORG_CONFIGDIR must be relative to /etc/X11, not '$XORG_CONFIGDIR'."
+      warn "Xorg rejects an absolute -configdir when it has elevated privileges,"
+      warn "which the fbdev panel needs. Use e.g. 'fielddeck.conf.d'."
+      XORG_CONFIGDIR=""
+    fi
+  fi
+  if [[ -n "$XORG_CONFIGDIR" ]]; then
+    XORG_CONFIGDIR_ABS="/etc/X11/$XORG_CONFIGDIR"
+    if [[ -d "$XORG_CONFIGDIR_ABS" ]]; then
+      XORG_ARGS+=(-configdir "$XORG_CONFIGDIR")
+      log "xorg config directory: $XORG_CONFIGDIR_ABS"
+      # Worth listing: -configdir REPLACES /etc/X11/xorg.conf.d rather than
+      # adding to it, so anything not in here is not applied to the panel.
+      for f in "$XORG_CONFIGDIR_ABS"/*.conf; do
+        [[ -e "$f" ]] && log "  $(basename "$f")"
+      done
+    else
+      warn "$XORG_CONFIGDIR_ABS does not exist; using Xorg's default config directory."
+    fi
+  fi
+
+  log "exec xinit $XINITRC -- $DISPLAY_NUM vt$VT ${XORG_ARGS[*]-}"
   # -keeptty: the service already owns /dev/tty1 (TTYPath= in the unit). Without
   #   it X opens a tty of its own, fights the one systemd gave us, and usually
   #   fails with "Cannot open virtual console".
@@ -126,7 +174,7 @@ main() {
   #   this device that should be drawing on the panel.
   # vt$VT: pin the console. Letting X pick means it sometimes lands on a VT the
   #   operator cannot get back from.
-  exec xinit "$XINITRC" -- "$DISPLAY_NUM" "vt${VT}" -keeptty -nolisten tcp
+  exec xinit "$XINITRC" -- "$DISPLAY_NUM" "vt${VT}" -keeptty -nolisten tcp "${XORG_ARGS[@]}"
 }
 
 main "$@"

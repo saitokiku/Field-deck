@@ -253,6 +253,7 @@ See **[docs/claude-integration.md](docs/claude-integration.md)**.
 | [docs/recipes.md](docs/recipes.md) | Writing repeatable test procedures in YAML |
 | [docs/claude-integration.md](docs/claude-integration.md) | The MCP server and the AI boundary |
 | [docs/field-op-desktop.md](docs/field-op-desktop.md) | The optional Openbox desktop for when a monitor and keyboard are plugged in |
+| [docs/osoyoo-3.5-panel.md](docs/osoyoo-3.5-panel.md) | Bringing up an OSOYOO/Waveshare 3.5" SPI panel and putting the HMI on it |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Symptom → cause → fix |
 
 ---

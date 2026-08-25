@@ -1,0 +1,16 @@
+# Example drop-in: /etc/systemd/system/fielddeck-kiosk.service.d/20-panel.conf
+#
+# Needed when the unit is NOT the only graphical thing on the box - e.g. a Pi
+# that also runs a desktop. The kiosk defaults to DISPLAY :0, which a desktop's
+# X (or labwc's Xwayland) already owns, and the kiosk then dies with
+# "Server is already active for display 0".
+#
+# VT1 usually stays free because the unit already declares
+# Conflicts=getty@tty1.service.
+#
+# FIELDDECK_XORG_CONFIGDIR must be RELATIVE - Xorg resolves it under /etc/X11
+# and refuses an absolute path whenever Xwrapper.config sets
+# needs_root_rights=yes, which an fbdev panel requires.
+[Service]
+Environment=FIELDDECK_KIOSK_DISPLAY=:1
+Environment=FIELDDECK_XORG_CONFIGDIR=fielddeck.conf.d
