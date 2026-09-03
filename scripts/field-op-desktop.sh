@@ -59,6 +59,21 @@ run() {
   "$@"
 }
 
+confirm() {
+  # Same contract as scripts/install.sh: a non-interactive run is told
+  # explicitly that it may proceed, rather than having the answer guessed for
+  # it. This script installs a desktop and about thirty packages onto someone
+  # else's machine, so the guess is not one to make on their behalf.
+  local prompt="$1"
+  (( ASSUME_YES )) && { say "--assume-yes: continuing."; return 0; }
+  if [[ ! -t 0 ]]; then
+    die "$prompt - refusing to guess on a non-interactive run. Re-run with --assume-yes if you mean it."
+  fi
+  local reply
+  read -r -p "    $prompt [y/N] " reply
+  [[ "$reply" == [yY] || "$reply" == [yY][eE][sS] ]]
+}
+
 # Write a file as $OPERATOR, honouring --dry-run. Content arrives on stdin.
 write_user_file() {
   local path="$1" mode="${2:-0644}" content
@@ -129,6 +144,13 @@ say  "session entry       $XSESSION"
 say  "apt                 $( ((WITH_APT)) && echo yes || echo 'no (--no-apt)' )"
 say  "zram swap           $( ((WITH_ZRAM)) && echo 'yes, 50% of RAM' || echo 'no (--no-zram)' )"
 (( DRY_RUN )) && say "dry run             YES — nothing will be changed"
+
+# The plan above is the whole point of the prompt: everything after this line
+# writes to the operator's home directory, the package set or the greeter. A
+# dry run changes nothing, so it does not ask.
+if (( ! DRY_RUN )); then
+  confirm "Install the Field-Op desktop for ${OPERATOR}?" || die "stopped at your request"
+fi
 
 # ---------------------------------------------------------------------------
 
