@@ -1,6 +1,6 @@
 """Authorization, end to end through the dispatcher.
 
-These are the mandatory tests from SPEC.md section 39, and they are written
+These are the mandatory safety tests, and they are written
 against a real ``instrumentd`` over a real socket on purpose.  A unit test of
 :class:`~fielddeck.safety.manager.SafetyManager` proves the manager's own
 logic; it does not prove that the *pipeline* consults it, in the right order,
