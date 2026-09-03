@@ -14,6 +14,14 @@ because in this project they matter more than one:
 
 ## [Unreleased]
 
+### Fixed
+
+- `scripts/field-op-desktop.sh` accepted `-y`/`--assume-yes` and documented it
+  as "Do not prompt", but had no prompt to suppress: it installed a desktop
+  session and about thirty packages without ever asking. It now confirms before
+  it changes anything, honours `--assume-yes`, refuses rather than guessing on a
+  non-interactive run without it, and still asks nothing on `--dry-run`.
+
 ## [0.1.0] — 2026-08-21
 
 First release. Alpha, and honest about it: everything here has been verified in
