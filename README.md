@@ -119,45 +119,27 @@ exactly the thing FieldDeck exists to show you.
 
 ## What you need
 
-The minimum that is genuinely useful, and what each thing buys you.
+Only the first three rows are required, and even they are only required to run
+FieldDeck *on a Pi* — the daemon, the CLI, the HMI and the whole test suite run
+on any Linux box with nothing plugged in at all.
 
-### Required
-
-| Part | Notes |
+| | |
 |---|---|
-| **Raspberry Pi 4**, 2 GB or more | A Pi 5 works. A Pi 3 works for serial/Modbus but struggles with sustained CAN capture. |
-| **microSD card, 32 GB+, A2-rated** | Capture writes are small but constant. A slow card is the single most common cause of dropped frames. |
-| **Raspberry Pi OS Bookworm (64-bit) Lite** | Lite, not Desktop. FieldDeck brings its own minimal Xorg for the panel. |
-| **A good 5 V supply** | 3 A official PSU. Under-volting a Pi mid-capture corrupts the session, and a bus transceiver browning out looks exactly like a bus fault. |
+| **Raspberry Pi 4**, 2 GB+ | A Pi 5 is faster. A Pi 3 does serial, Modbus and bench work but drops frames under sustained CAN load. |
+| **microSD, 32 GB+, A2-rated** | A slow or worn card is the single most common cause of dropped frames, and it looks exactly like a bus problem. |
+| **5 V / 3 A supply** | An under-volted Pi throttles mid-capture, and a browning-out transceiver looks identical to a dead ECU. |
+| 3.5" 480×320 SPI touchscreen | The HMI is laid out for exactly 80×25 characters at this size. Resistive is better here — it works with gloves. HDMI or SSH is fine too. |
+| A USB-serial adapter | FTDI FT232R, CP2102 or CH340. **RS-232 needs a real level shifter**; a 3.3 V TTL adapter on a ±12 V line dies. |
+| A SocketCAN interface | An MCP2518FD HAT or a USB CANable/PEAK/Kvaser. Nothing without a proper transceiver. |
+| An ST-Link, a `sigrok` analyzer, an SCPI instrument | For firmware, logic and bench work respectively. |
 
-### Strongly recommended
+Two cheap things worth buying before anything else: a **USB isolator** between
+the Pi and anything attached to a vehicle or an industrial machine, and a
+**DS3231 RTC** so a networkless Pi does not timestamp your session in 1970.
 
-| Part | Why |
-|---|---|
-| **3.5" 480×320 SPI touchscreen** | The HMI is laid out for exactly 80×25 characters at this size. Waveshare 3.5" (B) and clones work; resistive is fine and works with gloves. |
-| **USB-serial adapter** with a real chip | FTDI FT232, Silicon Labs CP2102, or CH340. Counterfeit FTDI chips are common and fail in confusing ways. |
-| **CAN interface** | See below — this is the choice that matters most. |
-
-### Per-protocol
-
-| You want to work on | Get |
-|---|---|
-| **CAN / CAN FD** | A SocketCAN-capable interface. MCP2515 HATs (SPI) are cheap and cap out around 500 kbit/s reliably; a Waveshare 2-CH CAN FD HAT (MCP2518FD) or a USB Kvaser/PEAK/CANable is better. **Do not** use an interface without a proper transceiver. |
-| **RS-485 / Modbus RTU** | A USB-RS485 adapter with automatic direction control, or a MAX3485 breakout. Note whether your bus needs 120 Ω termination — FieldDeck will not guess. |
-| **RS-232** | A real level shifter (MAX3232). A TTL adapter on an RS-232 line sees ±12 V and dies. |
-| **Bench instruments** | Typed support ships for **supplies, DMMs and electronic loads** — Rigol DP800/DL3000, Siglent SPD/SDL, Keysight 3446x, Korad/Tenma. Oscilloscopes and function generators are reachable only through raw `scpi.query`; there is no typed scope support yet. |
-| **Firmware / debug** | ST-Link V2, J-Link, CMSIS-DAP, or a Pi acting as an SWD probe via OpenOCD. |
-| **Logic analysis** | Any `sigrok`-supported analyzer. An $8 8-channel clone is genuinely useful here. |
-
-### Very good ideas
-
-- **A USB isolator** between the Pi and anything attached to a vehicle,
-  an industrial bus, or mains-adjacent equipment. Ground loops destroy Pis.
-- **A UPS HAT or a power bank** so a capture survives being unplugged.
-- **A real-time clock module.** Without one, a Pi with no network boots at
-  1970 and your session timestamps are fiction. (FieldDeck records a monotonic
-  clock alongside wall time specifically so a wrong RTC does not corrupt
-  correlation — but you still want to know when something happened.)
+Which CAN interface to buy, why a SPI panel and a CAN HAT fight over the SPI
+bus, and what each part is actually for:
+**[docs/raspberry-pi-setup.md](docs/raspberry-pi-setup.md)**.
 
 ---
 
@@ -216,28 +198,23 @@ point you at the wrong wire.
 
 ---
 
-## Claude, and why it can't hurt anything
+## The assistant, and why it can't hurt anything
 
-FieldDeck ships an [MCP](https://modelcontextprotocol.io) server so Claude
-can sit in the second tmux window, watch the same session you're watching,
-and help you read what the bus is doing.
+FieldDeck ships an [MCP](https://modelcontextprotocol.io) server so an assistant
+can sit in the second tmux window, watch the same session you're watching, and
+help you read a 4 MB capture.
 
-It connects to a **different socket** than you do. On that socket:
+It connects to a **different socket** than you do. Every request on it is
+stamped `source=claude` in the audit log, and `safety.arm`, `safety.disarm`,
+`safety.estop_clear` and `safety.lease_renew` are refused **at the transport**,
+before any handler sees them — not by policy, but by there being no code path.
+Releasing a lease is still allowed, because that ends a hazard. Of the 29 tools
+exposed, none arms anything; `estop` is one of them, so the assistant can stop
+the bench and cannot start it.
 
-- Every request is stamped `source=claude`, in the audit log, forever.
-- `safety.arm`, `safety.disarm`, `safety.estop_clear` and `safety.lease_renew`
-  are refused **at the transport**, before any handler sees them. Not by policy
-  — by there being no code path. Releasing a lease is still allowed, because
-  that ends a hazard.
-- Of the 29 tools exposed, none arms anything. `estop` is there: Claude can
-  stop the bench, and cannot start it.
-- When the next useful step needs authority, the tool result says so and tells
-  the model to stop and ask you.
-
-The assistant is a very good pair of eyes on a 4 MB capture. It is not an
-operator, and the architecture is what enforces that rather than the prompt.
-
-See **[docs/claude-integration.md](docs/claude-integration.md)**.
+It is a very good pair of eyes. It is not an operator, and the architecture is
+what enforces that rather than the prompt. See
+**[docs/claude-integration.md](docs/claude-integration.md)**.
 
 ---
 

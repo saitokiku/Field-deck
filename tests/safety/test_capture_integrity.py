@@ -7,7 +7,7 @@ produced nothing"*, and the operator cannot tell them apart six months later.
 
 The real SocketCAN driver has always deleted empty captures.  The simulated
 one did not, so the property was false in exactly the place a new user tests
-it first, and the divergence broke the contract in CLAUDE.md that simulation
+it first, and the divergence broke the project's contract that simulation
 exercises the same behaviour as real hardware.
 """
 

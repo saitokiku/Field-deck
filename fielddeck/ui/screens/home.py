@@ -7,8 +7,8 @@ Each tile carries its own live count, because a BUS tile that says ``2 ✓`` has
 already told the operator that the CAN adapter came back after they re-seated
 it.
 
-The grid is the SPEC section 30 layout: three across, two down, every tile far
-larger than the 90x45 pixel touch minimum.  BUS, LOGIC and DEVICE open the
+The grid is three across and two down, every tile far larger than the 90x45
+pixel touch minimum.  BUS, LOGIC and DEVICE open the
 discovery list filtered to their transports rather than guessing which of two
 adapters was meant.
 """
@@ -83,9 +83,9 @@ class HomeScreen(PanelScreen):
     async def _assistant(self) -> None:
         """Short-form only, by design.
 
-        CLAUDE.md section 23 puts long conversations in the CLAUDE tmux window,
-        not here: an assistant that can fill the panel is an assistant that can
-        push the safety chrome off it.
+        Long conversations belong in the CLAUDE tmux window, not here: an
+        assistant that can fill the panel is an assistant that can push the
+        safety chrome off it.
         """
         from fielddeck.common.events import EventType
 
@@ -124,7 +124,7 @@ def _bench_status(state: UiState) -> str:
 
 
 def _summary(state: UiState) -> str:
-    """The one-line bench summary from the SPEC mockup, filled from real state."""
+    """The one-line bench summary, filled from real state."""
     parts: list[str] = []
     can = state.device_for(TransportKind.CAN)
     if can is not None:

@@ -99,92 +99,13 @@ failure, a hardened systemd unit, udev rules, and a supervised tmux kiosk.
 
 ### Fixed
 
-Found during pre-release verification, listed because they say something about
-where the sharp edges are:
-
-- **Three path-traversal bypasses in the external-tool guard.** Firmware paths
-  reach `run_tool` from recipes and from the MCP surface, and the guard skipped
-  any argument beginning with `-` and only inspected relative paths that
-  *began* with `../`. So `--firmware=/etc/shadow`, dfu-util's `-D/etc/shadow`
-  and `sub/../../../../etc/shadow` all passed, as did a path inside openocd's
-  composite `-c "program ... "` argument.
-- **A QUERY action could write firmware.** Every planner in
-  `fielddeck/debug/flash.py` ended with an unconditional "and anything else is
-  a program" return, so an operation a given tool did not implement silently
-  became a firmware write: `pyocd verify` and `dfu-util verify` built a
-  *program* plan under a QUERY grant, `dfu-util reset` did under CONTROL, and
-  `dfu-util erase` did under a DESTRUCTIVE confirmation naming an erase.
-  Planners now refuse what they cannot do, and `DebugActions._execute` refuses
-  any plan more dangerous than the permission the dispatcher granted — so the
-  same bug in a future tool wrapper fails closed.
-- **A device that disappeared kept its output lease forever.** `discover()`
-  retired the device but never released the lease, so it stayed in the safety
-  snapshot and on the HMI banner, and no safe state could satisfy it —
-  `apply_safe_state` for an unregistered device returned an empty list without
-  a word. Losing a device while it holds an output lease is now CRITICAL: it
-  means something energised is no longer under FieldDeck's control.
-- **A safe state that failed was recorded as "safe state applied".** The
-  timeline showed *"safe state applied to bench-psu"* at WARNING for a supply
-  whose `safe_state()` had just timed out or raised. Failures are now CRITICAL,
-  say *"treat this device as live"*, and the emergency-stop reply carries
-  `all_devices_safe` and `devices_not_safed` at the top level rather than
-  leaving a client to scan a list. The same change untangled `applied: False`,
-  which meant both "I failed" and "a DMM has no outputs" — reading those the
-  same way made the DMM look dangerous and the live supply look ordinary.
-- **An in-flight action could undo a safe state that overtook it.** A slow
-  `psu.output(enabled=True)` that was authorized before an emergency stop
-  finished after it, and turned the rail back on. The stop reported success,
-  the action reported success, and the rail was live with the stop latched.
-  Lease expiry lost the same way. Devices now carry a safe-state generation
-  that a handler checks across its own execution.
-- **The restricted AI socket could renew a lease it did not own**, holding a
-  rail up past the interval its operator set — the dead-man handle held down
-  by the thing it exists to be independent of. Renewal is now refused at that
-  transport, restricted to the lease's holder, and cannot lengthen the
-  interval.
-- **An ESTOP bypass.** `allowed_during_estop` was read off the `ActionSpec`
-  rather than the resolved permission, so the flag that lets you *de-energise*
-  a rail during a latched stop also let you *energise* one. It was masked by
-  the default `estop_requires_ack` policy rather than prevented by design.
-- **Sequential safe-state on ESTOP**, where one wedged driver delayed every
-  device behind it. Now concurrent: measured 6 ms to de-energise with two
-  drivers hanging indefinitely.
-- **A 64 KB RPC response limit** — asyncio's `StreamReader` default — that
-  killed the client's read loop on a capture of roughly 800 CAN frames.
-- **Event batching with no age bound**, which lost a partial batch on `SIGKILL`.
-- **`fdctl` could not find the daemon on an installed system**, because the
-  install-layout probe required write access to a directory operators
-  legitimately cannot write.
-- **A compound-SCPI bypass**: `OUTP ON;*IDN?` classified as a query because it
-  ends in a question mark. A message is a query only if every
-  semicolon-separated segment is one.
-- **A nested-exponent denial of service** in the recipe expression evaluator.
-- **`tools.convert` answered "internal error"** on long digit strings, where
-  CPython's int/str conversion limit and a float conversion both escaped
-  untyped.
-- **Serial ports opened without deasserting DTR/RTS first**, which reboots any
-  Arduino or ESP32 you were trying to observe.
-- **The simulated CAN driver kept zero-frame capture files** where the real
-  driver deletes them, so a 0-byte artifact with a hash read as "we recorded
-  and the bus was quiet".
-- **The installer never installed tmux**, while announcing that it did. tmux is
-  the top-level session manager for the whole kiosk chain and is not
-  preinstalled on Raspberry Pi OS Lite, so a clean install produced a unit
-  whose panel could not start.
-- **No still-capture backend was installed**, so `camera.snapshot` was
-  registered and could never succeed — and preflight, whose optional-tools
-  section exists to say what is missing and what it costs, did not mention it.
-- **The 90° and 270° touch rotation matrices were swapped** between the
-  troubleshooting guide and the shipped Xorg configuration.
-- **The panel told operators to run three commands that do not exist.** The
-  TOOLS screen's UNIT and FILE tiles printed `fdctl convert unit ...`,
-  `fdctl session artifacts` and `fdctl inspect ...`; the real forms are
-  `fdctl convert 24 --op unit`, `fdctl session show` and
-  `fdctl call tools.inspect_file`.
-- **The documented emergency-stop key did not exist.** Four documents named
-  F9; the HMI bound only `ctrl+e`. F9 is now bound (and is the one shown in
-  the footer, because an emergency stop advertising two keys invites a
-  moment's choice); `ctrl+e` still works.
+Nothing user-facing: 0.1.0 is the first release. The commit history covers the
+pre-release audit, whose findings are worth knowing about because they say where
+the sharp edges in this kind of software are — a path-traversal bypass in the
+external-tool guard, a QUERY-level action that could reach a firmware write, a
+lost device that kept its output lease, an in-flight action that could undo an
+emergency stop that overtook it, and a lease the restricted AI socket could
+renew on someone else's behalf. Each is pinned by a regression test.
 
 ### Known limitations
 
@@ -193,8 +114,6 @@ where the sharp edges are:
 - SocketCAN has not been exercised against a real interface.
 - The Raspberry Pi install path, the SPI panel and the kiosk boot have been
   dry-run and syntax-checked, not run on a Pi.
-- `config/ui.example.yaml` is a reserved design sketch; no loader reads it, it
-  says so at the top, and the installer deliberately does not install it.
 - **No typed oscilloscope or function-generator support.** The six shipped
   instrument profiles cover supplies, DMMs and electronic loads. A scope is
   reachable through raw `scpi.query` and nothing more; there is no waveform

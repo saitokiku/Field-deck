@@ -57,8 +57,9 @@ make ui               # the HMI against it
 
 ## The rules that are not negotiable
 
-These come from the specification, and a pull request that breaks one will be
-asked to change rather than debated.
+These are the architectural invariants the project is built on;
+[docs/safety-model.md](docs/safety-model.md) explains the reasoning. A pull
+request that breaks one will be asked to change rather than debated.
 
 **1. `instrumentd` is the only thing that touches hardware.** No client opens
 `/dev/tty*`, `/dev/spidev*`, `/dev/i2c-*`, a CAN interface or a USB instrument.

@@ -4,8 +4,8 @@ Without this, the simulated PSU and the simulated CAN bus each have their own
 unrelated timer, and "correlate a fault across subsystems" cannot actually be
 demonstrated — there is nothing to correlate.
 
-With it, the simulated devices share one causal story, which is the one the
-specification uses as its worked example::
+With it, the simulated devices share one causal story — the worked example the
+README walks through::
 
     output enabled
       -> current sits at 0.418 A into the 57.4 ohm load

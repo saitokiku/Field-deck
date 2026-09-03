@@ -1,4 +1,4 @@
-"""Every command family the specification names must exist.
+"""Every command family FieldDeck commits to must exist.
 
 `fdctl` had no `logic`, `debug`, `firmware` or `flash` family. Those actions
 were reachable -- `fdctl call flash.plan tool=openocd operation=program ...` --
@@ -6,7 +6,7 @@ but the escape hatch is not the same as support. It offers no completion, no
 help text naming the permission a command needs, and no confirmation prompt
 before something irreversible.
 
-The list below is the one in CLAUDE.md section 13. It changes rarely and
+The list below is that surface. It changes rarely and
 deliberately; if a family is dropped, that should be a decision someone makes,
 not something that quietly stops being true.
 """
@@ -22,7 +22,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent.parent
 
-#: Command families named in CLAUDE.md section 13.
+#: The command families FieldDeck commits to.
 FAMILIES = [
     "arm",
     "bench",
@@ -68,7 +68,7 @@ def _fdctl(*args: str) -> subprocess.CompletedProcess[str]:
 def test_the_command_family_exists(family: str) -> None:
     result = _fdctl(family, "--help")
     assert "No such command" not in (result.stdout + result.stderr), (
-        f"fdctl has no '{family}' family, which CLAUDE.md section 13 names"
+        f"fdctl has no '{family}' family, which its documented surface names"
     )
 
 

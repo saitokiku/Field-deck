@@ -30,7 +30,7 @@ async def test_home_reaches_every_screen_and_returns(panel: Panel) -> None:
 
 
 async def test_the_navigation_keys_match_the_tiles(panel: Panel) -> None:
-    """Everything reachable by touch is reachable from a keyboard, per SPEC."""
+    """Everything reachable by touch is reachable from a keyboard."""
     await panel.press("s")
     await panel.settle(lambda: panel.screen_name == "session", what="the session screen")
 

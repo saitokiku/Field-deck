@@ -7,8 +7,8 @@ reads without it.  Every screen imports these constants rather than typing a
 character inline, because "does a filled circle mean recording or fault?" is a
 question an operator should only have to answer once.
 
-The vocabulary is fixed by SPEC section 30 and CLAUDE.md section 4.3.  Do not
-extend it casually: a new glyph is a new thing to learn at 2am.
+The vocabulary is fixed.  Do not extend it casually: a new glyph is a new
+thing to learn at 2am.
 """
 
 from __future__ import annotations

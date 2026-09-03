@@ -466,7 +466,7 @@ def _parse_action(raw: dict[str, Any], *, phase: str, index: int, depth: int) ->
     name = name.strip()
 
     # The two conceptual step kinds that read naturally as actions.  Both
-    # spellings appear in the specification's examples, and refusing one of
+    # spellings appear in the shipped examples, and refusing one of
     # them would only make recipes harder to write, not safer.
     if name == "wait":
         _reject_unexpected(raw, {"action", "seconds"}, phase=phase, index=index, kind="wait")

@@ -537,8 +537,6 @@ install_directories() {
   install_config_file "$SOURCE_DIR/config/fielddeck.example.yaml" "$CONFIG_DIR/fielddeck.yaml" "root:$FD_GROUP" 0644
   install_config_file "$SOURCE_DIR/config/safety.example.yaml"    "$CONFIG_DIR/safety.yaml"    "root:$FD_GROUP" 0644
   install_config_file "$SOURCE_DIR/config/instruments/README.md"  "$CONFIG_DIR/instruments/README.md" "root:$FD_GROUP" 0644
-  note "config/ui.example.yaml is NOT installed: no loader reads ui.yaml yet, and"
-  note "a config file that silently does nothing reads as a promise. See the file."
 
   # Consumed by the kiosk and tmux scripts, and by the systemd units as an
   # EnvironmentFile. Deliberately restricted to KEY=value so it is valid in both

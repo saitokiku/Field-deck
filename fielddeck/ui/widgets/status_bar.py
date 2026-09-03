@@ -11,9 +11,8 @@ live arm countdowns, then an unacknowledged fault, then the reassuring case.
 An ESTOP banner is drawn in reverse video across the full width so it survives
 a monochrome panel, a washed-out screen and a photograph of the bench.
 
-The navigation row is five tiles of sixteen columns — the SPEC section 30
-layout — so every one of them clears the 90x45 pixel touch minimum on a
-480x320 panel.
+The navigation row is five tiles of sixteen columns, so every one of them
+clears the 90x45 pixel touch minimum on a 480x320 panel.
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 __all__ = ["HOME_NAV", "SUB_NAV", "NavBar", "StatusBar"]
 
-#: The five tiles on the home screen, per SPEC section 30.
+#: The five tiles on the home screen.
 HOME_NAV: tuple[tuple[str, str], ...] = (
     ("home", "HOME"),
     ("session", "SESSION"),
@@ -50,9 +49,9 @@ HOME_NAV: tuple[tuple[str, str], ...] = (
     ("menu", "MENU"),
 )
 
-#: Sub-screens trade HOME and SESSION for BACK and MARK, as the CLAUDE.md
-#: mockups do.  ARM, REC and MENU never move: an operator reaching for the
-#: emergency-adjacent controls must find them in the same place on every screen.
+#: Sub-screens trade HOME and SESSION for BACK and MARK.  ARM, REC and MENU
+#: never move: an operator reaching for the emergency-adjacent controls must
+#: find them in the same place on every screen.
 SUB_NAV: tuple[tuple[str, str], ...] = (
     ("back", "BACK"),
     ("mark", "MARK"),
